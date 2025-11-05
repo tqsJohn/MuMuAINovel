@@ -1,257 +1,325 @@
 # CLAUDE.md
 
-这个文件为 Claude Code (claude.ai/code) 在此代码库中工作提供指导。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 项目概述
 
 MuMuAINovel 是一个基于 AI 的智能小说创作助手，采用前后端分离架构：
-- **后端**：FastAPI + SQLAlchemy (异步) + SQLite
+- **后端**：FastAPI + SQLAlchemy (异步) + SQLite (每用户独立数据库)
 - **前端**：React 18 + TypeScript + Ant Design + Zustand
-- **AI集成**：支持 OpenAI、Anthropic Claude、Google Gemini 等多个 AI 提供商
+- **AI集成**：OpenAI、Anthropic Claude、支持中转 API
 
-核心功能包括：向导式小说项目创建、AI 自动生成大纲/角色/世界观、章节编辑与润色、RAG 记忆系统、写作风格管理等。
+核心功能：向导式小说项目创建、AI 生成大纲/角色/世界观、章节编辑与润色、RAG 记忆系统、写作风格管理。
 
 ## 开发环境设置
 
-### 后端开发
+### 快速启动
 
+**后端**：
 ```bash
-# 进入后端目录
 cd backend
-
-# 创建并激活虚拟环境
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# Linux/Mac: source .venv/bin/activate
-
-# 安装依赖
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
-# 配置环境变量（从示例文件复制）
-cp .env.example .env
-# 编辑 .env，至少配置一个 AI 服务的 API Key
-
-# 运行开发服务器（带热重载）
+cp .env.example .env  # 编辑 .env 配置至少一个 AI 服务的 API Key
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# 或直接运行
-python -m app.main
 ```
 
-### 前端开发
-
+**前端**：
 ```bash
-# 进入前端目录
 cd frontend
-
-# 安装依赖
 npm install
-
-# 开发模式（需要后端已启动在 8000 端口）
-npm run dev
-
-# 生产构建
-npm run build
-
-# Lint 检查
-npm run lint
+npm run dev          # 开发模式
+npm run build        # 生产构建
+npm run lint         # Lint 检查
 ```
 
-### Docker 部署
-
+**Docker 部署**：
 ```bash
-# 使用 Docker Compose 启动（会自动构建）
+# 配置 .env 后直接启动
 docker-compose up -d
-
-# 查看日志
-docker-compose logs -f
-
-# 停止服务
-docker-compose down
-
-# 重新构建
-docker-compose up -d --build
+docker-compose logs -f  # 查看日志
 ```
 
 ## 核心架构
 
 ### 后端架构 (backend/app/)
 
-**入口与配置**：
-- `main.py` - FastAPI 应用入口，路由注册，全局异常处理，SPA 静态文件服务
-- `config.py` - 基于 Pydantic Settings 的配置管理，从 .env 加载环境变量
-- `database.py` - 异步 SQLAlchemy 引擎和会话管理，**多用户数据隔离**（每个用户独立的 SQLite 文件）
-
-**数据层** (models/):
-- 使用 SQLAlchemy 异步 ORM
-- 核心模型：`Project`, `Outline`, `Character`, `Chapter`, `WritingStyle`, `StoryMemory`, `PlotAnalysis`
-- 关系管理：`CharacterRelationship`, `Organization`, `OrganizationMember`
-- 用户和设置：通过 `user_manager.py` 管理，支持 LinuxDO OAuth 和本地账户登录
-
-**业务逻辑** (services/):
-- `ai_service.py` - **AI 服务统一封装**，使用 httpx 自定义请求头避免触发 Cloudflare，支持流式响应
-  - OpenAI 兼容接口（支持中转 API）
-  - Anthropic Claude 接口
-  - 统一的 `stream_chat()` 和 `chat()` 方法
-- `prompt_service.py` - 写作风格管理（6种预设风格）和提示词应用
-- `memory_service.py` - RAG 长期记忆系统（ChromaDB + sentence-transformers）
-- `plot_analyzer.py` - 章节剧情分析服务
-- `import_export_service.py` - 项目数据导入导出
-- `oauth_service.py` - LinuxDO OAuth2 认证服务
-
-**API 路由** (api/):
-- `auth.py` - 认证接口（LinuxDO OAuth、本地账户登录、会话刷新）
-- `projects.py` - 项目 CRUD
-- `wizard_stream.py` - **向导流式生成**（SSE 流式返回 AI 生成的大纲、角色、世界观）
-- `chapters.py` - 章节生成、编辑、润色、重新生成
-- `characters.py` - 角色管理
-- `outlines.py` - 大纲管理
-- `writing_styles.py` - 写作风格管理
-- `memories.py` - 记忆系统 API
-
-**中间件** (middleware/):
-- `RequestIDMiddleware` - 为每个请求添加唯一 ID
-- `AuthMiddleware` - 会话验证和用户身份识别（从 session token 提取 user_id）
-
-**工具** (utils/):
-- 包含各种辅助函数和工具类
+```
+app/
+├── main.py              # FastAPI 应用入口，路由注册，全局异常处理，SPA 服务
+├── config.py            # Pydantic Settings 配置管理
+├── database.py          # 异步 SQLAlchemy，多用户数据库隔离（重要！）
+├── user_manager.py      # 用户会话管理（Cookie + 内存存储）
+├── logger.py            # 日志配置
+├── api/                 # API 路由层
+│   ├── auth.py          # 认证（LinuxDO OAuth + 本地账户）
+│   ├── projects.py      # 项目 CRUD
+│   ├── wizard_stream.py # ⭐ SSE 流式向导生成
+│   ├── chapters.py      # 章节生成、编辑、润色
+│   ├── characters.py    # 角色管理
+│   ├── outlines.py      # 大纲管理
+│   ├── writing_styles.py# 写作风格管理
+│   ├── memories.py      # RAG 记忆系统
+│   └── ...
+├── models/              # SQLAlchemy 模型（异步）
+│   ├── project.py
+│   ├── character.py
+│   ├── chapter.py
+│   ├── relationship.py  # 角色关系、组织
+│   ├── memory.py        # RAG 记忆
+│   └── ...
+├── schemas/             # Pydantic 验证模型
+├── services/            # 业务逻辑层
+│   ├── ai_service.py    # ⭐ AI 统一封装（OpenAI/Claude，自定义 httpx 客户端）
+│   ├── prompt_service.py# 提示词和写作风格管理
+│   ├── memory_service.py# ChromaDB + sentence-transformers
+│   └── oauth_service.py # LinuxDO OAuth2
+├── middleware/          # 中间件
+│   ├── auth_middleware.py # 从 Cookie 提取 user_id 注入 request.state
+│   └── request_id.py    # 请求 ID 追踪
+└── utils/               # 工具函数
+    ├── sse_response.py  # SSE 流式响应封装
+    └── ...
+```
 
 ### 前端架构 (frontend/src/)
 
-**状态管理** (store/):
-- 使用 Zustand 进行全局状态管理
-- `authStore` - 用户认证状态和会话管理
+```
+src/
+├── pages/               # 页面组件
+│   ├── ProjectList.tsx
+│   ├── ProjectWizardNew.tsx  # ⭐ SSE 流式接收
+│   ├── Chapters.tsx
+│   ├── Characters.tsx
+│   └── Outline.tsx
+├── components/          # 通用组件
+├── services/            # API 调用（Axios）
+├── store/               # Zustand 状态管理
+│   └── authStore.ts     # 认证状态
+├── types/               # TypeScript 类型定义
+└── utils/
+```
 
-**页面组件** (pages/):
-- `ProjectList.tsx` - 项目列表页
-- `ProjectWizardNew.tsx` - **向导式创建**（SSE 流式接收 AI 生成内容）
-- `Chapters.tsx` - 章节管理页（生成、编辑、润色）
-- `Characters.tsx` - 角色管理页
-- `Outline.tsx` - 大纲管理页
+## 关键架构模式
 
-**服务层** (services/):
-- 使用 Axios 进行 API 调用
-- 自动处理认证 token 和错误
+### 1. 多用户数据库隔离 (database.py)
 
-**类型定义** (types/):
-- TypeScript 类型定义，与后端 schemas 对应
+**核心机制**：每个用户独立的 SQLite 文件
+```python
+# 数据库文件: data/ai_story_user_{user_id}.db
+# 引擎缓存: _engine_cache 字典，按 user_id 索引
+# 线程安全: asyncio.Lock 保护引擎创建过程
+```
 
-## 重要实现细节
+**工作流程**：
+1. `AuthMiddleware` 从 Cookie 提取 `user_id` → `request.state.user_id`
+2. API 依赖 `get_db(request)` → 根据 `user_id` 获取用户专属引擎
+3. 引擎缓存避免重复创建，首次创建时自动初始化数据库表
 
-### 多用户数据隔离
+**会话统计监控**：访问 `/health/db-sessions` 查看连接泄漏
 
-数据库使用**用户级隔离**策略，每个用户有独立的 SQLite 文件：
-- 数据库文件路径：`data/ai_story_user_{user_id}.db`
-- 在 `database.py` 的 `get_engine()` 中实现引擎缓存和线程安全
-- API 中通过 `AuthMiddleware` 从 session token 提取 `user_id`
-- 使用 `get_db_session(request: Request)` 获取用户专属数据库会话
+### 2. AI 服务封装 (services/ai_service.py)
 
-### AI 服务调用机制
+**关键优化**（避免 Cloudflare 拦截）：
+```python
+# ❌ 不直接使用 OpenAI SDK 的默认 HTTP 客户端
+# ✅ 使用自定义 httpx.AsyncClient
+http_client = httpx.AsyncClient(
+    headers={"User-Agent": "Mozilla/5.0 ..."},  # 模拟浏览器
+    limits=httpx.Limits(max_keepalive_connections=50, max_connections=100)
+)
+```
 
-**关键优化**（避免触发 Cloudflare）：
-- 不使用 OpenAI SDK 的内置 HTTP 客户端
-- 使用 httpx 构建自定义 HTTP 客户端，添加标准浏览器 User-Agent
-- 连接池配置：max_keepalive_connections=50, max_connections=100
+**统一接口**：
+- `stream_chat()` - 流式生成（SSE）
+- `chat()` - 一次性生成
+- 支持 OpenAI 兼容接口（含中转 API）和 Anthropic Claude
 
-**流式响应**：
-- 后端使用 `StreamingResponse` + `text/event-stream`
-- 前端使用 EventSource 或 fetch + ReadableStream 接收
+**Deepseek 模型特殊处理**：自动丢弃 `reasoning_content`，仅保留 `content`
 
-**Deepseek 模型特殊处理**：
-- 舍弃 `reasoning_content`（思考过程），只保留 `content`（结果内容）
+### 3. SSE 流式响应 (wizard_stream.py + utils/sse_response.py)
 
-### 会话管理
+**后端**：
+```python
+async def generator() -> AsyncGenerator[str, None]:
+    yield await SSEResponse.send_progress("开始生成...", 10)
+    async for chunk in ai_service.stream_chat(...):
+        yield await SSEResponse.send_chunk(chunk)
+    yield await SSEResponse.send_complete(accumulated_text)
 
-- 会话过期时间：默认 120 分钟（可通过 `SESSION_EXPIRE_MINUTES` 配置）
-- 会话刷新阈值：默认 30 分钟（可通过 `SESSION_REFRESH_THRESHOLD_MINUTES` 配置）
-- 前端应在会话即将过期时调用 `/api/auth/refresh-session` 刷新
+return create_sse_response(generator())
+```
 
-### RAG 记忆系统
+**前端**：使用 EventSource 或 `fetch` + ReadableStream 接收
+- 避免长时间阻塞超时
+- 实时反馈生成进度
 
-- 使用 ChromaDB 作为向量数据库
-- sentence-transformers 生成 embeddings
-- 支持章节内容的语义检索和剧情分析
-- 相关模型：`StoryMemory`, `PlotAnalysis`, `AnalysisTask`
+**数据库会话管理**：SSE 中手动控制事务提交，避免 GeneratorExit 泄漏
+
+### 4. 会话与认证
+
+- **会话存储**：`user_manager.py` 内存存储（重启后失效）
+- **Cookie 传递**：`user_id` Cookie → `AuthMiddleware` → `request.state.user_id`
+- **过期时间**：默认 120 分钟，刷新阈值 30 分钟（`/api/auth/refresh-session`）
+
+### 5. RAG 记忆系统
+
+- **向量数据库**：ChromaDB
+- **Embeddings**：sentence-transformers (paraphrase-multilingual-MiniLM-L12-v2)
+- **功能**：章节内容语义检索、剧情分析
+- **模型**：`StoryMemory`, `PlotAnalysis`, `AnalysisTask`
 
 ## 常见开发任务
 
-### 添加新的 API 端点
+### 添加新 API 端点
 
-1. 在 `backend/app/api/` 创建或编辑路由文件
-2. 在 `backend/app/models/` 添加或修改数据模型（如需要）
-3. 在 `backend/app/schemas/` 添加 Pydantic 验证模型
-4. 在 `main.py` 中注册路由：`app.include_router(your_router, prefix="/api")`
-5. 前端在 `src/services/` 添加 API 调用函数
-6. 在 `src/types/` 添加 TypeScript 类型定义
+1. **创建路由**：`backend/app/api/your_router.py`
+   ```python
+   from fastapi import APIRouter, Depends
+   from app.database import get_db
+
+   router = APIRouter(prefix="/your-prefix", tags=["标签"])
+
+   @router.get("/")
+   async def your_endpoint(db: AsyncSession = Depends(get_db)):
+       # user_id 已通过 AuthMiddleware 注入到 request.state
+       pass
+   ```
+
+2. **添加模型**（如需要）：
+   - `backend/app/models/your_model.py` - SQLAlchemy 模型
+   - `backend/app/schemas/your_schema.py` - Pydantic 模型
+
+3. **注册路由**：`backend/app/main.py`
+   ```python
+   from app.api import your_router
+   app.include_router(your_router.router, prefix="/api")
+   ```
+
+4. **前端集成**：
+   - `frontend/src/services/yourService.ts` - API 调用
+   - `frontend/src/types/your.ts` - TypeScript 类型
 
 ### 修改 AI 提示词
 
-1. 查看 `backend/app/services/prompt_service.py` 中的预设风格
-2. 具体的提示词模板通常嵌入在各个 API 路由中（如 `wizard_stream.py`, `chapters.py`）
-3. 注意写作风格的应用：使用 `WritingStyleManager.apply_style_to_prompt()`
+**预设风格**：`backend/app/services/prompt_service.py` - `WritingStyleManager`
+- 6种预设风格：玄幻仙侠、现代都市、科幻未来、悬疑推理、武侠江湖、古风言情
+
+**提示词模板**：
+- 向导生成：`wizard_stream.py` - `world_building_generator()`, `character_generator()` 等
+- 章节生成：`chapters.py` - `generate_chapter_content()`
+
+**应用风格**：
+```python
+from app.services.prompt_service import WritingStyleManager
+styled_prompt = WritingStyleManager.apply_style_to_prompt(base_prompt, style_config)
+```
 
 ### 数据库迁移
 
-项目使用 SQLAlchemy，但**未集成 Alembic**。数据库结构变更：
-1. 修改 `backend/app/models/` 中的模型定义
-2. 删除或备份现有的数据库文件（`backend/data/ai_story_user_*.db`）
-3. 重启应用，数据库会自动重建（通过 `database.py` 中的 `init_db()`）
+**当前方式**：未集成 Alembic，手动管理
+1. 修改 `backend/app/models/` 中的模型
+2. 删除/备份数据库文件：`backend/data/ai_story_user_*.db`
+3. 重启应用，`database.py` 的 `init_db()` 自动重建
 
-**生产环境建议**：集成 Alembic 进行版本化迁移管理。
+**生产环境建议**：集成 Alembic 进行版本化迁移
 
-### 添加新的 AI 提供商
+### 添加新 AI 提供商
 
-1. 在 `backend/app/services/ai_service.py` 的 `AIService` 类中添加新客户端初始化
-2. 在 `stream_chat()` 和 `chat()` 方法中添加对应的调用逻辑
-3. 在 `backend/.env.example` 和 `backend/app/config.py` 添加配置项
-4. 更新前端设置页面以支持新提供商配置
+1. **修改 AI 服务**：`backend/app/services/ai_service.py`
+   - `__init__()` - 初始化客户端
+   - `stream_chat()` / `chat()` - 添加调用逻辑
 
-## 测试
+2. **配置管理**：
+   - `backend/.env.example` - 添加示例配置
+   - `backend/app/config.py` - 添加配置字段
 
-目前项目**未包含单元测试**。建议添加：
-- 后端：使用 pytest + pytest-asyncio
-- 前端：使用 Vitest + React Testing Library
+3. **前端设置**：更新设置页面支持新提供商选择
 
-## API 文档
+### 调试 SSE 流式生成问题
 
-启动后端后访问：
+**后端检查**：
+```bash
+# 查看数据库会话统计，检测连接泄漏
+curl http://localhost:8000/health/db-sessions
+
+# 查看日志
+tail -f backend/logs/app.log
+```
+
+**常见问题**：
+- `GeneratorExit` - 客户端断开连接，已自动处理事务回滚
+- 活跃会话数过多 (>100) - 可能存在连接泄漏
+- Cloudflare 拦截 - 检查 `ai_service.py` 的 User-Agent 配置
+
+## 测试与监控
+
+**测试**：目前无单元测试，建议添加：
+- 后端：pytest + pytest-asyncio
+- 前端：Vitest + React Testing Library
+
+**API 文档**：
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
-## 日志
+**健康检查**：
+- 基础健康：`GET /health`
+- 数据库会话统计：`GET /health/db-sessions`
 
-- 后端日志：`backend/logs/app.log`（按日期轮转，保留 30 个备份）
-- 日志级别在 `.env` 中配置：`LOG_LEVEL=INFO`
+**日志**：
+- 文件：`backend/logs/app.log`（按日期轮转，保留 30 个备份）
+- 级别：`.env` 中配置 `LOG_LEVEL=INFO`
 
-## 数据存储
+**数据存储**：
+- 数据库：`backend/data/ai_story_user_{user_id}.db`
+- ChromaDB：`backend/data/chroma/` 或内存
 
-- 数据库文件：`backend/data/ai_story_user_{user_id}.db`
-- 向量数据库（ChromaDB）：存储在内存或 `backend/data/chroma/`（取决于配置）
+## 环境变量配置
 
-## 环境变量关键配置
+**必需配置**（`backend/.env`）：
+```bash
+# AI 服务（至少配置一个）
+OPENAI_API_KEY=sk-...           # OpenAI API Key
+ANTHROPIC_API_KEY=sk-ant-...    # Anthropic API Key
 
-**必需配置**：
-- `OPENAI_API_KEY` 或 `ANTHROPIC_API_KEY`：至少配置一个 AI 服务
-- `LOCAL_AUTH_PASSWORD`：本地登录密码（生产环境务必修改）
+# 本地账户（生产环境务必修改密码）
+LOCAL_AUTH_PASSWORD=your_secure_password_here
+```
 
-**可选但推荐**：
-- `OPENAI_BASE_URL`：使用中转 API 时修改（如 New API、API2D 等）
-- `DEFAULT_AI_PROVIDER`：选择默认提供商（openai/anthropic）
-- `DEFAULT_MODEL`：选择默认模型（如 gpt-4o-mini, claude-3-sonnet）
-- `SESSION_EXPIRE_MINUTES`：会话过期时间
-- `LINUXDO_CLIENT_ID`, `LINUXDO_CLIENT_SECRET`：启用 LinuxDO OAuth 登录
+**推荐配置**：
+```bash
+# 中转 API（如使用）
+OPENAI_BASE_URL=https://api.new-api.com/v1  # 或其他中转服务
 
-## 已知问题与注意事项
+# 默认 AI 设置
+DEFAULT_AI_PROVIDER=openai                   # openai/anthropic
+DEFAULT_MODEL=gpt-4o-mini                    # 或 claude-3-5-sonnet-20241022
+DEFAULT_TEMPERATURE=0.8
+DEFAULT_MAX_TOKENS=32000
 
-1. **Deepseek 模型**：会返回思考过程（`reasoning_content`），代码中已处理，只使用 `content`
-2. **并发生成**：向导式生成使用 SSE，注意数据库会话管理避免连接泄漏
-3. **Cloudflare 拦截**：使用自定义 User-Agent 和 httpx 客户端避免被部分公益站拦截
-4. **Token 限制**：注意不同模型的 token 限制，`DEFAULT_MAX_TOKENS=32000` 仅为默认值
-5. **数据库锁**：SQLite 在高并发下可能出现锁等待，考虑切换到 PostgreSQL（需修改 `database.py`）
+# LinuxDO OAuth（可选）
+LINUXDO_CLIENT_ID=...
+LINUXDO_CLIENT_SECRET=...
+LINUXDO_REDIRECT_URI=http://localhost:8000/api/auth/callback
+```
+
+**推荐模型**：
+- OpenAI：`gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo`
+- Anthropic：`claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`
+- Deepseek：`deepseek-chat`（自动处理 reasoning_content）
+
+## 已知问题与限制
+
+1. **Deepseek 模型特殊处理**：自动丢弃 `reasoning_content`，仅使用 `content`
+2. **SQLite 并发限制**：高并发场景可能出现锁等待，考虑切换 PostgreSQL
+3. **Cloudflare 拦截**：已使用自定义 User-Agent 规避，如仍被拦截检查中转 API 配置
+4. **会话内存存储**：用户会话存储在内存中，服务重启后需重新登录
+5. **无数据库迁移工具**：数据库结构变更需手动处理，生产环境建议集成 Alembic
+6. **SSE 连接断开**：客户端断开会触发 `GeneratorExit`，已自动处理事务回滚
 
 ## Git 工作流
 
-- 主分支：`main`
-- 开发分支：`dev`
-- 提交信息遵循常规格式（如有约定）
-- **重要**：不要提交 `.env` 文件和 `data/` 目录（已在 .gitignore 中）
+- **主分支**：`main`
+- **开发分支**：`dev`
+- **当前分支**：`chaos/增加短篇能力-1104`
+- **注意**：不要提交 `.env` 文件和 `data/` 目录（已在 .gitignore）
