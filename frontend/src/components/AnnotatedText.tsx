@@ -32,6 +32,7 @@ interface AnnotatedTextProps {
   onAnnotationClick?: (annotation: MemoryAnnotation) => void;
   activeAnnotationId?: string;
   scrollToAnnotation?: string;
+  style?: React.CSSProperties;
 }
 
 // 类型颜色映射
@@ -60,6 +61,7 @@ const AnnotatedText: React.FC<AnnotatedTextProps> = ({
   onAnnotationClick,
   activeAnnotationId,
   scrollToAnnotation,
+  style,
 }) => {
   const annotationRefs = useRef<Record<string, HTMLSpanElement | null>>({});
 
@@ -243,6 +245,7 @@ const AnnotatedText: React.FC<AnnotatedTextProps> = ({
         fontSize: 16,
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
+        ...style,
       }}
     >
       {segments.map((segment, index) => renderAnnotatedSegment(segment, index))}

@@ -2,11 +2,15 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel, Field
+import json
 
 from app.database import get_db
 from app.models.relationship import Organization, OrganizationMember
 from app.models.character import Character
+from app.models.project import Project
+from app.models.generation_history import GenerationHistory
 from app.schemas.relationship import (
     OrganizationCreate,
     OrganizationUpdate,
@@ -17,10 +21,23 @@ from app.schemas.relationship import (
     OrganizationMemberResponse,
     OrganizationMemberDetailResponse
 )
+from app.schemas.character import CharacterResponse
+from app.services.ai_service import AIService
+from app.services.prompt_service import prompt_service
 from app.logger import get_logger
+from app.api.settings import get_user_ai_service
 
 router = APIRouter(prefix="/organizations", tags=["组织管理"])
 logger = get_logger(__name__)
+
+
+class OrganizationGenerateRequest(BaseModel):
+    """AI生成组织的请求模型"""
+    project_id: str = Field(..., description="项目ID")
+    name: Optional[str] = Field(None, description="组织名称")
+    organization_type: Optional[str] = Field(None, description="组织类型")
+    background: Optional[str] = Field(None, description="组织背景")
+    requirements: Optional[str] = Field(None, description="特殊要求")
 
 
 @router.get("/project/{project_id}", response_model=List[OrganizationDetailResponse], summary="获取项目的所有组织")
@@ -339,3 +356,192 @@ async def remove_organization_member(
     
     logger.info(f"移除成员成功：{member_id}")
     return {"message": "成员移除成功", "id": member_id}
+
+@router.post("/generate", response_model=CharacterResponse, summary="AI生成组织")
+async def generate_organization(
+    request: OrganizationGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    user_ai_service: AIService = Depends(get_user_ai_service)
+):
+    """
+    使用AI生成组织设定
+    
+    根据用户输入的信息，结合项目的世界观、主题等背景，
+    AI会生成一个完整、详细的组织设定。
+    
+    生成内容包括：组织名称、类型、特性、背景、目的、势力等级等
+    """
+    # 验证项目是否存在并获取项目信息
+    result = await db.execute(
+        select(Project).where(Project.id == request.project_id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    try:
+        # 获取已存在的角色和组织列表
+        existing_chars_result = await db.execute(
+            select(Character)
+            .where(Character.project_id == request.project_id)
+            .order_by(Character.created_at.desc())
+        )
+        existing_characters = existing_chars_result.scalars().all()
+        
+        # 构建现有角色和组织信息摘要
+        existing_info = ""
+        character_list = []
+        organization_list = []
+        
+        if existing_characters:
+            for c in existing_characters[:10]:  # 最多显示10个
+                if c.is_organization:
+                    organization_list.append(f"- {c.name} [{c.organization_type or '组织'}]")
+                else:
+                    character_list.append(f"- {c.name}（{c.role_type or '未知'}）")
+            
+            if character_list:
+                existing_info += "\n已有角色：\n" + "\n".join(character_list)
+            if organization_list:
+                existing_info += "\n\n已有组织：\n" + "\n".join(organization_list)
+        
+        # 构建项目上下文信息
+        project_context = f"""
+项目信息：
+- 书名：{project.title}
+- 主题：{project.theme or '未设定'}
+- 类型：{project.genre or '未设定'}
+- 时间背景：{project.world_time_period or '未设定'}
+- 地理位置：{project.world_location or '未设定'}
+- 氛围基调：{project.world_atmosphere or '未设定'}
+- 世界规则：{project.world_rules or '未设定'}
+{existing_info}
+"""
+        
+        # 构建用户输入信息
+        user_input = f"""
+用户要求：
+- 组织名称：{request.name or '请AI生成'}
+- 组织类型：{request.organization_type or '请AI根据世界观决定'}
+- 背景设定：{request.background or '无特殊要求'}
+- 其他要求：{request.requirements or '无'}
+"""
+        
+        # 使用统一的提示词服务
+        prompt = prompt_service.get_single_organization_prompt(
+            project_context=project_context,
+            user_input=user_input
+        )
+        
+        # 调用AI生成组织
+        logger.info(f"🎯 开始为项目 {request.project_id} 生成组织")
+        logger.info(f"  - 组织名：{request.name or 'AI生成'}")
+        logger.info(f"  - 组织类型：{request.organization_type or 'AI决定'}")
+        logger.info(f"  - 背景设定：{request.background or '无'}")
+        logger.info(f"  - AI提供商：{user_ai_service.api_provider}")
+        logger.info(f"  - AI模型：{user_ai_service.default_model}")
+        logger.info(f"  - Prompt长度：{len(prompt)} 字符")
+        
+        try:
+            ai_response = await user_ai_service.generate_text(prompt=prompt)
+            logger.info(f"✅ AI响应接收完成，长度：{len(ai_response) if ai_response else 0} 字符")
+        except Exception as ai_error:
+            logger.error(f"❌ AI服务调用异常：{str(ai_error)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"AI服务调用失败：{str(ai_error)}"
+            )
+        
+        # 检查AI响应
+        if not ai_response or not ai_response.strip():
+            logger.error("❌ AI返回了空响应")
+            raise HTTPException(
+                status_code=500,
+                detail="AI服务返回空响应。请检查AI配置和网络连接。"
+            )
+        
+        logger.info(f"📝 开始清理AI响应")
+        # 清理AI响应
+        cleaned_response = ai_response.strip()
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response[7:]
+        if cleaned_response.startswith("```"):
+            cleaned_response = cleaned_response[3:]
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3]
+        cleaned_response = cleaned_response.strip()
+        
+        logger.info(f"  - 清理后长度：{len(cleaned_response)}")
+        
+        # 解析AI响应
+        logger.info(f"🔍 开始解析JSON")
+        try:
+            organization_data = json.loads(cleaned_response)
+            logger.info(f"✅ JSON解析成功")
+            logger.info(f"  - 解析后的字段：{list(organization_data.keys())}")
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON解析失败：{str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"AI返回的内容无法解析为JSON。错误：{str(e)}"
+            )
+        
+        # 创建角色记录（组织也是角色的一种）
+        character = Character(
+            project_id=request.project_id,
+            name=organization_data.get("name", request.name or "未命名组织"),
+            is_organization=True,
+            role_type="supporting",  # 组织通常作为配角
+            personality=organization_data.get("personality", ""),
+            background=organization_data.get("background", ""),
+            appearance=organization_data.get("appearance", ""),
+            organization_type=organization_data.get("organization_type"),
+            organization_purpose=organization_data.get("organization_purpose"),
+            organization_members=json.dumps(
+                organization_data.get("organization_members", []), 
+                ensure_ascii=False
+            ),
+            traits=json.dumps(
+                organization_data.get("traits", []), 
+                ensure_ascii=False
+            )
+        )
+        db.add(character)
+        await db.flush()
+        
+        logger.info(f"✅ 组织角色创建成功：{character.name} (ID: {character.id})")
+        
+        # 自动创建Organization详情记录
+        organization = Organization(
+            character_id=character.id,
+            project_id=request.project_id,
+            member_count=0,
+            power_level=organization_data.get("power_level", 50),
+            location=organization_data.get("location"),
+            motto=organization_data.get("motto"),
+            color=organization_data.get("color")
+        )
+        db.add(organization)
+        await db.flush()
+        
+        logger.info(f"✅ 组织详情创建成功：{character.name} (Org ID: {organization.id})")
+        
+        # 记录生成历史
+        history = GenerationHistory(
+            project_id=request.project_id,
+            prompt=prompt,
+            generated_content=ai_response,
+            model=user_ai_service.default_model
+        )
+        db.add(history)
+        
+        await db.commit()
+        await db.refresh(character)
+        
+        logger.info(f"🎉 成功为项目 {request.project_id} 生成组织: {character.name}")
+        
+        return character
+        
+    except Exception as e:
+        logger.error(f"生成组织失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"生成组织失败: {str(e)}")

@@ -122,6 +122,42 @@ export const CharacterCard: React.FC<CharacterCardProps> = ({ character, onEdit,
                     <Tag color="cyan">{character.organization_type}</Tag>
                   </div>
                 )}
+                {character.power_level !== undefined && character.power_level !== null && (
+                  <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center' }}>
+                    <Text type="secondary" style={{ flexShrink: 0 }}>势力等级：</Text>
+                    <Tag color={character.power_level >= 70 ? 'red' : character.power_level >= 50 ? 'orange' : 'default'}>
+                      {character.power_level}
+                    </Tag>
+                  </div>
+                )}
+                {character.location && (
+                  <div style={{ marginBottom: 8, display: 'flex', alignItems: 'flex-start' }}>
+                    <Text type="secondary" style={{ flexShrink: 0 }}>所在地：</Text>
+                    <Text
+                      style={{ flex: 1, minWidth: 0 }}
+                      ellipsis={{ tooltip: character.location }}
+                    >
+                      {character.location}
+                    </Text>
+                  </div>
+                )}
+                {character.color && (
+                  <div style={{ marginBottom: 8, display: 'flex', alignItems: 'flex-start' }}>
+                    <Text type="secondary" style={{ flexShrink: 0 }}>代表颜色：</Text>
+                    <Text style={{ flex: 1, minWidth: 0 }}>{character.color}</Text>
+                  </div>
+                )}
+                {character.motto && (
+                  <div style={{ marginBottom: 8, display: 'flex', alignItems: 'flex-start' }}>
+                    <Text type="secondary" style={{ flexShrink: 0 }}>格言：</Text>
+                    <Text
+                      style={{ flex: 1, minWidth: 0 }}
+                      ellipsis={{ tooltip: character.motto }}
+                    >
+                      {character.motto}
+                    </Text>
+                  </div>
+                )}
                 {character.organization_purpose && (
                   <div style={{ marginBottom: 8, display: 'flex', alignItems: 'flex-start' }}>
                     <Text type="secondary" style={{ flexShrink: 0 }}>目的：</Text>

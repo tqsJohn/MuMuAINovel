@@ -46,6 +46,12 @@ class CharacterResponse(CharacterBase):
     created_at: datetime
     updated_at: datetime
     
+    # 组织额外字段（从Organization表关联）
+    power_level: Optional[int] = Field(None, description="组织势力等级(0-100)")
+    location: Optional[str] = Field(None, description="组织所在地")
+    motto: Optional[str] = Field(None, description="组织格言/口号")
+    color: Optional[str] = Field(None, description="组织代表颜色")
+    
     class Config:
         from_attributes = True
 
@@ -57,8 +63,6 @@ class CharacterGenerateRequest(BaseModel):
     role_type: Optional[str] = Field(None, description="角色类型")
     background: Optional[str] = Field(None, description="角色背景")
     requirements: Optional[str] = Field(None, description="特殊要求")
-    provider: Optional[str] = Field(None, description="AI提供商")
-    model: Optional[str] = Field(None, description="AI模型")
 
 
 class CharacterListResponse(BaseModel):

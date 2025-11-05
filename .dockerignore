@@ -40,6 +40,10 @@ Thumbs.db
 data/*.db
 backend/data/*.db
 
+# ChromaDB数据库（不包含在镜像中，会在运行时生成）
+backend/data/chroma_db/
+
+
 # 日志文件
 logs/
 *.log

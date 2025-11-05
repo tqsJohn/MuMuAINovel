@@ -452,21 +452,24 @@ async def characters_generator(
             elif isinstance(char_data.get("relationships"), str):
                 relationships_text = char_data.get("relationships")
             
+            # 判断是否为组织
+            is_organization = char_data.get("is_organization", False)
+            
             character = Character(
                 project_id=project_id,
                 name=char_data.get("name", "未命名角色"),
-                age=char_data.get("age"),
-                gender=char_data.get("gender"),
-                is_organization=char_data.get("is_organization", False),
+                age=str(char_data.get("age", "")) if not is_organization else None,
+                gender=char_data.get("gender") if not is_organization else None,
+                is_organization=is_organization,
                 role_type=char_data.get("role_type", "supporting"),
                 personality=char_data.get("personality", ""),
                 background=char_data.get("background", ""),
                 appearance=char_data.get("appearance", ""),
                 relationships=relationships_text,
-                organization_type=char_data.get("organization_type"),
-                organization_purpose=char_data.get("organization_purpose"),
-                organization_members=json.dumps(char_data.get("organization_members", []), ensure_ascii=False),
-                traits=json.dumps(char_data.get("traits", []), ensure_ascii=False)
+                organization_type=char_data.get("organization_type") if is_organization else None,
+                organization_purpose=char_data.get("organization_purpose") if is_organization else None,
+                organization_members=json.dumps(char_data.get("organization_members", []), ensure_ascii=False) if is_organization else None,
+                traits=json.dumps(char_data.get("traits", []), ensure_ascii=False) if char_data.get("traits") else None
             )
             db.add(character)
             created_characters.append((character, char_data))
@@ -497,9 +500,10 @@ async def characters_generator(
                         character_id=character.id,
                         project_id=project_id,
                         member_count=0,  # 初始为0，后续添加成员时会更新
-                        power_level=char_data.get("power_level", 5),
+                        power_level=char_data.get("power_level", 50),
                         location=char_data.get("location"),
-                        motto=char_data.get("motto")
+                        motto=char_data.get("motto"),
+                        color=char_data.get("color")
                     )
                     db.add(org)
                     logger.info(f"向导创建组织记录：{character.name}")

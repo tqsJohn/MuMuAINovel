@@ -331,6 +331,7 @@ export function useChapterSync() {
 
       let buffer = '';
       let fullContent = '';
+      let analysisTaskId: string | undefined;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -363,9 +364,13 @@ export function useChapterSync() {
               } else if (message.type === 'error') {
                 throw new Error(message.error || '生成失败');
               } else if (message.type === 'done') {
+                // 生成完成，保存分析任务ID
+                analysisTaskId = message.analysis_task_id;
                 // 生成完成，刷新章节数据
                 await refreshChapters();
-                return { content: fullContent, word_count: message.word_count };
+              } else if (message.type === 'analysis_queued') {
+                // 分析任务已加入队列
+                analysisTaskId = message.task_id;
               }
             }
           } catch (error) {
@@ -374,7 +379,10 @@ export function useChapterSync() {
         }
       }
 
-      return { content: fullContent };
+      return {
+        content: fullContent,
+        analysis_task_id: analysisTaskId
+      };
     } catch (error) {
       console.error('AI流式生成章节内容失败:', error);
       throw error;

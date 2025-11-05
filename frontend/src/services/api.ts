@@ -147,7 +147,7 @@ export const settingsApi = {
   getAvailableModels: (params: { api_key: string; api_base_url: string; provider: string }) =>
     api.get<unknown, { provider: string; models: Array<{ value: string; label: string; description: string }>; count?: number }>('/settings/models', { params }),
   
-  testApiConnection: (params: { api_key: string; api_base_url: string; provider: string; model_name: string }) =>
+  testApiConnection: (params: { api_key: string; api_base_url: string; provider: string; llm_model: string }) =>
     api.post<unknown, {
       success: boolean;
       message: string;

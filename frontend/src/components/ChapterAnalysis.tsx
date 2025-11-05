@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Modal, Progress, Spin, Alert, Tabs, Card, Tag, List, Empty, Statistic, Row, Col, Button } from 'antd';
-import { 
-  ThunderboltOutlined, 
-  BulbOutlined, 
-  FireOutlined, 
+import {
+  ThunderboltOutlined,
+  BulbOutlined,
+  FireOutlined,
   HeartOutlined,
   TeamOutlined,
   TrophyOutlined,
@@ -13,6 +13,9 @@ import {
   ReloadOutlined
 } from '@ant-design/icons';
 import type { AnalysisTask, ChapterAnalysisResponse } from '../types';
+
+// 判断是否为移动设备
+const isMobileDevice = () => window.innerWidth < 768;
 
 interface ChapterAnalysisProps {
   chapterId: string;
@@ -25,11 +28,25 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
   const [analysis, setAnalysis] = useState<ChapterAnalysisResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(isMobileDevice());
 
   useEffect(() => {
     if (visible && chapterId) {
       fetchAnalysisStatus();
     }
+    
+    // 监听窗口大小变化
+    const handleResize = () => {
+      setIsMobile(isMobileDevice());
+    };
+    
+    window.addEventListener('resize', handleResize);
+    
+    // 清理函数：组件卸载或关闭时清除轮询
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      // 清除可能存在的轮询
+    };
   }, [visible, chapterId]);
 
   const fetchAnalysisStatus = async () => {
@@ -117,22 +134,15 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
         throw new Error(errorData.detail || '触发分析失败');
       }
       
-      const result = await response.json();
-      setTask({
-        task_id: result.task_id,
-        chapter_id: chapterId,
-        status: 'pending',
-        progress: 0
-      });
-      
-      // 开始轮询
-      startPolling();
+      // 触发成功后立即关闭Modal，让父组件的状态管理接管
+      onClose();
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setLoading(false);
     }
   };
+
 
   const renderStatusIcon = () => {
     if (!task) return null;
@@ -196,10 +206,10 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
             label: '概览',
             icon: <TrophyOutlined />,
             children: (
-              <div style={{ height: 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
-                <Card title="整体评分" style={{ marginBottom: 16 }}>
-                  <Row gutter={16}>
-                    <Col span={6}>
+              <div style={{ height: isMobile ? 'calc(80vh - 180px)' : 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
+                <Card title="整体评分" style={{ marginBottom: 16 }} size={isMobile ? 'small' : 'default'}>
+                  <Row gutter={isMobile ? 8 : 16}>
+                    <Col span={isMobile ? 12 : 6}>
                       <Statistic
                         title="整体质量"
                         value={analysis_data.overall_quality_score || 0}
@@ -207,21 +217,21 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
                         valueStyle={{ color: '#3f8600' }}
                       />
                     </Col>
-                    <Col span={6}>
+                    <Col span={isMobile ? 12 : 6}>
                       <Statistic
                         title="节奏把控"
                         value={analysis_data.pacing_score || 0}
                         suffix="/ 10"
                       />
                     </Col>
-                    <Col span={6}>
+                    <Col span={isMobile ? 12 : 6}>
                       <Statistic
                         title="吸引力"
                         value={analysis_data.engagement_score || 0}
                         suffix="/ 10"
                       />
                     </Col>
-                    <Col span={6}>
+                    <Col span={isMobile ? 12 : 6}>
                       <Statistic
                         title="连贯性"
                         value={analysis_data.coherence_score || 0}
@@ -232,15 +242,15 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
                 </Card>
                 
                 {analysis_data.analysis_report && (
-                  <Card title="分析摘要" style={{ marginBottom: 16 }}>
-                    <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+                  <Card title="分析摘要" style={{ marginBottom: 16 }} size={isMobile ? 'small' : 'default'}>
+                    <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: isMobile ? 13 : 14 }}>
                       {analysis_data.analysis_report}
                     </pre>
                   </Card>
                 )}
                 
                 {analysis_data.suggestions && analysis_data.suggestions.length > 0 && (
-                  <Card title={<><BulbOutlined /> 改进建议</>}>
+                  <Card title={<><BulbOutlined /> 改进建议</>} size={isMobile ? 'small' : 'default'}>
                     <List
                       dataSource={analysis_data.suggestions}
                       renderItem={(item, index) => (
@@ -259,8 +269,8 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
             label: `钩子 (${analysis_data.hooks?.length || 0})`,
             icon: <ThunderboltOutlined />,
             children: (
-              <div style={{ height: 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
-                <Card>
+              <div style={{ height: isMobile ? 'calc(80vh - 180px)' : 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
+                <Card size={isMobile ? 'small' : 'default'}>
                 {analysis_data.hooks && analysis_data.hooks.length > 0 ? (
                   <List
                     dataSource={analysis_data.hooks}
@@ -291,8 +301,8 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
             label: `伏笔 (${analysis_data.foreshadows?.length || 0})`,
             icon: <FireOutlined />,
             children: (
-              <div style={{ height: 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
-                <Card>
+              <div style={{ height: isMobile ? 'calc(80vh - 180px)' : 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
+                <Card size={isMobile ? 'small' : 'default'}>
                 {analysis_data.foreshadows && analysis_data.foreshadows.length > 0 ? (
                   <List
                     dataSource={analysis_data.foreshadows}
@@ -328,18 +338,18 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
             label: '情感曲线',
             icon: <HeartOutlined />,
             children: (
-              <div style={{ height: 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
-                <Card>
+              <div style={{ height: isMobile ? 'calc(80vh - 180px)' : 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
+                <Card size={isMobile ? 'small' : 'default'}>
                 {analysis_data.emotional_tone ? (
                   <div>
-                    <Row gutter={16} style={{ marginBottom: 24 }}>
-                      <Col span={12}>
+                    <Row gutter={isMobile ? 8 : 16} style={{ marginBottom: isMobile ? 16 : 24 }}>
+                      <Col span={isMobile ? 24 : 12}>
                         <Statistic
                           title="主导情绪"
                           value={analysis_data.emotional_tone}
                         />
                       </Col>
-                      <Col span={12}>
+                      <Col span={isMobile ? 24 : 12}>
                         <Statistic
                           title="情感强度"
                           value={(analysis_data.emotional_intensity * 10).toFixed(1)}
@@ -374,8 +384,8 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
             label: `角色 (${analysis_data.character_states?.length || 0})`,
             icon: <TeamOutlined />,
             children: (
-              <div style={{ height: 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
-                <Card>
+              <div style={{ height: isMobile ? 'calc(80vh - 180px)' : 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
+                <Card size={isMobile ? 'small' : 'default'}>
                 {analysis_data.character_states && analysis_data.character_states.length > 0 ? (
                   <List
                     dataSource={analysis_data.character_states}
@@ -416,8 +426,8 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
             label: `记忆 (${memories?.length || 0})`,
             icon: <FireOutlined />,
             children: (
-              <div style={{ height: 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
-                <Card>
+              <div style={{ height: isMobile ? 'calc(80vh - 180px)' : 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
+                <Card size={isMobile ? 'small' : 'default'}>
                 {memories && memories.length > 0 ? (
                   <List
                     dataSource={memories}
@@ -464,46 +474,65 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
       title="章节分析"
       open={visible}
       onCancel={onClose}
-      width="90%"
-      centered
+      width={isMobile ? '100%' : '90%'}
+      centered={!isMobile}
       style={{
-        maxWidth: '1400px',
-        paddingBottom: 0
+        maxWidth: isMobile ? '100%' : '1400px',
+        paddingBottom: 0,
+        top: isMobile ? 0 : undefined,
+        margin: isMobile ? 0 : undefined,
+        maxHeight: isMobile ? '100vh' : undefined
       }}
       styles={{
         body: {
-          padding: '24px',
-          paddingBottom: 0
+          padding: isMobile ? '12px' : '24px',
+          paddingBottom: 0,
+          maxHeight: isMobile ? 'calc(100vh - 110px)' : undefined,
+          overflowY: isMobile ? 'auto' : undefined
         }
       }}
       footer={[
-        <Button key="close" onClick={onClose}>
+        <Button key="close" onClick={onClose} size={isMobile ? 'small' : 'middle'}>
           关闭
         </Button>,
-        !task && (
+        !task && !loading && (
           <Button
             key="analyze"
             type="primary"
             icon={<ReloadOutlined />}
             onClick={triggerAnalysis}
             loading={loading}
+            size={isMobile ? 'small' : 'middle'}
           >
             开始分析
           </Button>
         ),
-        task && (task.status === 'failed' || task.status === 'completed') && (
+        task && (task.status === 'failed') && (
           <Button
             key="reanalyze"
             type="primary"
             icon={<ReloadOutlined />}
             onClick={triggerAnalysis}
             loading={loading}
-            danger={task.status === 'failed'}
+            danger
+            size={isMobile ? 'small' : 'middle'}
+          >
+            重新分析
+          </Button>
+        ),
+        task && task.status === 'completed' && (
+          <Button
+            key="reanalyze"
+            type="default"
+            icon={<ReloadOutlined />}
+            onClick={triggerAnalysis}
+            loading={loading}
+            size={isMobile ? 'small' : 'middle'}
           >
             重新分析
           </Button>
         )
-      ]}
+      ].filter(Boolean)}
     >
       {loading && !task && (
         <div style={{ textAlign: 'center', padding: '48px' }}>
@@ -518,11 +547,6 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
           description={error}
           type="error"
           showIcon
-          action={
-            <Button size="small" danger onClick={triggerAnalysis}>
-              开始分析
-            </Button>
-          }
         />
       )}
       

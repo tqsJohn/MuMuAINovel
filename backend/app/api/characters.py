@@ -44,7 +44,50 @@ async def get_characters(
     )
     characters = result.scalars().all()
     
-    return CharacterListResponse(total=total, items=characters)
+    # 为组织类型的角色填充Organization表的额外字段
+    enriched_characters = []
+    for char in characters:
+        char_dict = {
+            "id": char.id,
+            "project_id": char.project_id,
+            "name": char.name,
+            "age": char.age,
+            "gender": char.gender,
+            "is_organization": char.is_organization,
+            "role_type": char.role_type,
+            "personality": char.personality,
+            "background": char.background,
+            "appearance": char.appearance,
+            "relationships": char.relationships,
+            "organization_type": char.organization_type,
+            "organization_purpose": char.organization_purpose,
+            "organization_members": char.organization_members,
+            "traits": char.traits,
+            "avatar_url": char.avatar_url,
+            "created_at": char.created_at,
+            "updated_at": char.updated_at,
+            "power_level": None,
+            "location": None,
+            "motto": None,
+            "color": None
+        }
+        
+        if char.is_organization:
+            org_result = await db.execute(
+                select(Organization).where(Organization.character_id == char.id)
+            )
+            org = org_result.scalar_one_or_none()
+            if org:
+                char_dict.update({
+                    "power_level": org.power_level,
+                    "location": org.location,
+                    "motto": org.motto,
+                    "color": org.color
+                })
+        
+        enriched_characters.append(char_dict)
+    
+    return CharacterListResponse(total=total, items=enriched_characters)
 
 
 @router.get("/project/{project_id}", response_model=CharacterListResponse, summary="获取项目的所有角色")
@@ -67,7 +110,50 @@ async def get_project_characters(
     )
     characters = result.scalars().all()
     
-    return CharacterListResponse(total=total, items=characters)
+    # 为组织类型的角色填充Organization表的额外字段
+    enriched_characters = []
+    for char in characters:
+        char_dict = {
+            "id": char.id,
+            "project_id": char.project_id,
+            "name": char.name,
+            "age": char.age,
+            "gender": char.gender,
+            "is_organization": char.is_organization,
+            "role_type": char.role_type,
+            "personality": char.personality,
+            "background": char.background,
+            "appearance": char.appearance,
+            "relationships": char.relationships,
+            "organization_type": char.organization_type,
+            "organization_purpose": char.organization_purpose,
+            "organization_members": char.organization_members,
+            "traits": char.traits,
+            "avatar_url": char.avatar_url,
+            "created_at": char.created_at,
+            "updated_at": char.updated_at,
+            "power_level": None,
+            "location": None,
+            "motto": None,
+            "color": None
+        }
+        
+        if char.is_organization:
+            org_result = await db.execute(
+                select(Organization).where(Organization.character_id == char.id)
+            )
+            org = org_result.scalar_one_or_none()
+            if org:
+                char_dict.update({
+                    "power_level": org.power_level,
+                    "location": org.location,
+                    "motto": org.motto,
+                    "color": org.color
+                })
+        
+        enriched_characters.append(char_dict)
+    
+    return CharacterListResponse(total=total, items=enriched_characters)
 
 
 @router.get("/{character_id}", response_model=CharacterResponse, summary="获取角色详情")
@@ -213,16 +299,12 @@ async def generate_character(
         logger.info(f"  - 角色名：{request.name or 'AI生成'}")
         logger.info(f"  - 角色定位：{request.role_type}")
         logger.info(f"  - 背景设定：{request.background or '无'}")
-        logger.info(f"  - AI提供商：{request.provider or 'default'}")
-        logger.info(f"  - AI模型：{request.model or 'default'}")
+        logger.info(f"  - AI提供商：{user_ai_service.api_provider}")
+        logger.info(f"  - AI模型：{user_ai_service.default_model}")
         logger.info(f"  - Prompt长度：{len(prompt)} 字符")
         
         try:
-            ai_response = await user_ai_service.generate_text(
-                prompt=prompt,
-                provider=request.provider,
-                model=request.model
-            )
+            ai_response = await user_ai_service.generate_text(prompt=prompt)
             logger.info(f"✅ AI响应接收完成，长度：{len(ai_response) if ai_response else 0} 字符")
         except Exception as ai_error:
             logger.error(f"❌ AI服务调用异常：{str(ai_error)}")
@@ -317,7 +399,8 @@ async def generate_character(
                     member_count=0,
                     power_level=character_data.get("power_level", 50),
                     location=character_data.get("location"),
-                    motto=character_data.get("motto")
+                    motto=character_data.get("motto"),
+                    color=character_data.get("color")
                 )
                 db.add(organization)
                 await db.flush()
@@ -477,7 +560,7 @@ async def generate_character(
             project_id=request.project_id,
             prompt=prompt,
             generated_content=ai_response,
-            model=request.model or "default"
+            model=user_ai_service.default_model
         )
         db.add(history)
         

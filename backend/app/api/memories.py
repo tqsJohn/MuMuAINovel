@@ -61,7 +61,7 @@ async def analyze_chapter(
             api_provider=settings.api_provider,
             api_key=settings.api_key,
             api_base_url=settings.api_base_url,
-            model_name=settings.model_name,
+            model_name=settings.llm_model,
             temperature=settings.temperature,
             max_tokens=settings.max_tokens
         )

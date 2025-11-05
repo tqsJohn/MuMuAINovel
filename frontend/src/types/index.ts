@@ -18,7 +18,7 @@ export interface Settings {
   api_provider: string;
   api_key: string;
   api_base_url: string;
-  model_name: string;
+  llm_model: string;
   temperature: number;
   max_tokens: number;
   preferences?: string;
@@ -30,7 +30,7 @@ export interface SettingsUpdate {
   api_provider?: string;
   api_key?: string;
   api_base_url?: string;
-  model_name?: string;
+  llm_model?: string;
   temperature?: number;
   max_tokens?: number;
   preferences?: string;
@@ -172,6 +172,11 @@ export interface Character {
   organization_members?: string;
   traits?: string;
   avatar_url?: string;
+  // 组织扩展字段（从Organization表关联）
+  power_level?: number;
+  location?: string;
+  motto?: string;
+  color?: string;
   created_at: string;
   updated_at: string;
 }
@@ -190,6 +195,11 @@ export interface CharacterUpdate {
   organization_purpose?: string;
   organization_members?: string;
   traits?: string;
+  // 组织扩展字段
+  power_level?: number;
+  location?: string;
+  motto?: string;
+  color?: string;
 }
 
 // 章节类型定义

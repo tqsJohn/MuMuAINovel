@@ -169,7 +169,7 @@ class PromptService:
 - 至少1个主角（protagonist）
 - 多个配角（supporting）
 - 可以包含反派（antagonist）
-- 可以包含1-2个重要组织
+- 可以包含1-2个**高影响力的重要组织**（势力等级应在70-95之间）
 
 要求：
 - 角色要符合世界观设定
@@ -222,9 +222,20 @@ class PromptService:
     "organization_type": "组织类型",
     "organization_purpose": "组织目的",
     "organization_members": ["成员1", "成员2"],
+    "power_level": 85,
+    "location": "组织所在地或主要活动区域",
+    "motto": "组织格言、口号或宗旨",
+    "color": "组织代表颜色（如：深红色、金色、黑色等）",
     "traits": []
   }}
 ]
+
+**组织生成要求（重要）：**
+- 组织必须是对故事有重大影响的势力
+- power_level应在70-95之间（高影响力组织）
+- 不要生成无关紧要的小组织或普通社团
+- 组织应该是推动剧情发展的关键力量
+- 可以是正派势力、中立势力或反派势力，但一定要有存在感
 
 **关系类型参考（从中选择或自定义）：**
 - 家族：父亲、母亲、兄弟、姐妹、子女、配偶、恋人
@@ -683,6 +694,91 @@ class PromptService:
 2. 文本中不要使用中文引号（""），改用【】或《》
 3. 不要有任何额外的文字说明"""
 
+    # 单个组织生成提示词
+    SINGLE_ORGANIZATION_GENERATION = """你是一位专业的组织设定师。请根据以下信息创建一个完整的组织/势力设定。
+
+{project_context}
+
+{user_input}
+
+请生成一个完整的组织设定，包含以下所有信息：
+
+1. **基本信息**：
+   - 组织名称：如果用户未提供，请生成一个符合世界观的名称
+   - 组织类型：如帮派、公司、门派、学院、政府机构、宗教组织等
+   - 成立时间：具体时间或时间段
+
+2. **组织特性**（150-200字）：
+   - 组织的核心理念和行事风格
+   - 组织文化和价值观
+   - 运作方式和管理模式
+   - 特殊传统或规矩
+
+3. **组织背景**（200-300字）：
+   - 建立历史和起源
+   - 发展历程和重要事件
+   - 目前的地位和影响力
+   - 如何与项目主题关联
+   - 融入用户提供的背景设定
+
+4. **外在表现**（100-150字）：
+   - 总部或主要据点位置
+   - 标志性建筑或场所
+   - 组织标志、徽章、制服等
+   - 可辨识的外在特征
+
+5. **组织目的/宗旨**：
+   - 明确的组织目标
+   - 长期愿景
+   - 行动准则
+
+6. **势力等级**：
+   - 在世界中的影响力（0-100）
+   - 综合实力评估
+
+7. **所在地点**：
+   - 主要活动区域
+   - 势力范围
+
+**重要格式要求：**
+1. 只返回纯JSON格式，不要包含任何markdown标记、代码块标记或其他说明文字
+2. 不要在JSON字符串值中使用中文引号（""''），改用【】或《》
+3. 文本描述中的专有名词使用【】标记
+
+请严格按照以下JSON格式返回：
+{{
+  "name": "组织名称",
+  "is_organization": true,
+  "organization_type": "组织类型",
+  "personality": "组织特性（150-200字）",
+  "background": "组织背景（200-300字）",
+  "appearance": "外在表现（100-150字）",
+  "organization_purpose": "组织目的和宗旨",
+  "power_level": 75,
+  "location": "所在地点",
+  "motto": "组织格言或口号",
+  "traits": ["特征1", "特征2", "特征3"],
+  "color": "组织代表颜色（如：深红色、金色、黑色等）",
+  "organization_members": ["重要成员1", "重要成员2", "重要成员3"]
+}}
+
+**组织设定要求：**
+- 组织要符合项目的世界观和主题
+- 目标和行动要合理，不能过于理想化或脸谱化
+- 要有存在的必要性，能推动故事发展
+- 内部要有层级和结构
+- 与其他势力要有互动关系
+
+**说明**：
+1. power_level是0-100的整数，表示组织在世界中的影响力
+2. organization_members是组织内重要成员的名字列表（如果已有角色，可以关联）
+3. 所有文本描述要详细具体，避免空泛
+
+再次强调：
+1. 只返回纯JSON对象，不要有```json```这样的标记
+2. 文本中不要使用中文引号（""），改用【】或《》
+3. 不要有任何额外的文字说明"""
+
     @staticmethod
     def format_prompt(template: str, **kwargs) -> str:
         """
@@ -935,6 +1031,15 @@ class PromptService:
         """获取单个角色生成提示词"""
         return cls.format_prompt(
             cls.SINGLE_CHARACTER_GENERATION,
+            project_context=project_context,
+            user_input=user_input
+        )
+    
+    @classmethod
+    def get_single_organization_prompt(cls, project_context: str, user_input: str) -> str:
+        """获取单个组织生成提示词"""
+        return cls.format_prompt(
+            cls.SINGLE_ORGANIZATION_GENERATION,
             project_context=project_context,
             user_input=user_input
         )

@@ -28,7 +28,7 @@ def read_env_defaults() -> Dict[str, Any]:
         "api_provider": app_settings.default_ai_provider,
         "api_key": app_settings.openai_api_key or app_settings.anthropic_api_key or "",
         "api_base_url": app_settings.openai_base_url or app_settings.anthropic_base_url or "",
-        "model_name": app_settings.default_model,
+        "llm_model": app_settings.default_model,
         "temperature": app_settings.default_temperature,
         "max_tokens": app_settings.default_max_tokens,
     }
@@ -71,7 +71,7 @@ async def get_user_ai_service(
         api_provider=settings.api_provider,
         api_key=settings.api_key,
         api_base_url=settings.api_base_url or "",
-        model_name=settings.model_name,
+        model_name=settings.llm_model,
         temperature=settings.temperature,
         max_tokens=settings.max_tokens
     )
@@ -305,7 +305,7 @@ class ApiTestRequest(BaseModel):
     api_key: str
     api_base_url: str
     provider: str
-    model_name: str
+    llm_model: str
 
 
 @router.post("/test")
@@ -322,7 +322,7 @@ async def test_api_connection(data: ApiTestRequest):
     api_key = data.api_key
     api_base_url = data.api_base_url
     provider = data.provider
-    model_name = data.model_name
+    llm_model = data.llm_model
     import time
     
     try:
@@ -333,7 +333,7 @@ async def test_api_connection(data: ApiTestRequest):
             api_provider=provider,
             api_key=api_key,
             api_base_url=api_base_url,
-            default_model=model_name,
+            default_model=llm_model,
             default_temperature=0.7,
             default_max_tokens=100
         )
@@ -343,13 +343,13 @@ async def test_api_connection(data: ApiTestRequest):
         
         logger.info(f"🧪 开始测试 API 连接")
         logger.info(f"  - 提供商: {provider}")
-        logger.info(f"  - 模型: {model_name}")
+        logger.info(f"  - 模型: {llm_model}")
         logger.info(f"  - Base URL: {api_base_url}")
         
         response = await test_service.generate_text(
             prompt=test_prompt,
             provider=provider,
-            model=model_name,
+            model=llm_model,
             temperature=0.7,
             max_tokens=8000
         )
@@ -366,7 +366,7 @@ async def test_api_connection(data: ApiTestRequest):
             "message": "API 连接测试成功",
             "response_time_ms": response_time,
             "provider": provider,
-            "model": model_name,
+            "model": llm_model,
             "response_preview": response[:100] if response and len(response) > 100 else response,
             "details": {
                 "api_available": True,

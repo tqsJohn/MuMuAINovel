@@ -59,7 +59,7 @@ export default function SettingsPage() {
         form.setFieldsValue({
           api_provider: 'openai',
           api_base_url: 'https://api.openai.com/v1',
-          model_name: 'gpt-4',
+          llm_model: 'gpt-4',
           temperature: 0.7,
           max_tokens: 2000,
         });
@@ -96,7 +96,7 @@ export default function SettingsPage() {
           api_provider: 'openai',
           api_key: '',
           api_base_url: 'https://api.openai.com/v1',
-          model_name: 'gpt-4',
+          llm_model: 'gpt-4',
           temperature: 0.7,
           max_tokens: 2000,
         });
@@ -193,7 +193,7 @@ export default function SettingsPage() {
     const apiKey = form.getFieldValue('api_key');
     const apiBaseUrl = form.getFieldValue('api_base_url');
     const provider = form.getFieldValue('api_provider');
-    const modelName = form.getFieldValue('model_name');
+    const modelName = form.getFieldValue('llm_model');
 
     if (!apiKey || !apiBaseUrl || !provider || !modelName) {
       message.warning('请先填写完整的配置信息');
@@ -208,7 +208,7 @@ export default function SettingsPage() {
         api_key: apiKey,
         api_base_url: apiBaseUrl,
         provider: provider,
-        model_name: modelName
+        llm_model: modelName
       });
       
       setTestResult(result);
@@ -406,7 +406,7 @@ export default function SettingsPage() {
                       </Tooltip>
                     </Space>
                   }
-                  name="model_name"
+                  name="llm_model"
                   rules={[{ required: true, message: '请输入或选择模型名称' }]}
                 >
                   <Select

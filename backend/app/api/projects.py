@@ -1,5 +1,5 @@
 """项目管理API"""
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
@@ -13,6 +13,7 @@ from app.models.outline import Outline
 from app.models.chapter import Chapter
 from app.models.generation_history import GenerationHistory
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember
+from app.models.memory import StoryMemory, PlotAnalysis
 from app.schemas.project import (
     ProjectCreate,
     ProjectUpdate,
@@ -25,6 +26,7 @@ from app.schemas.import_export import (
     ImportResult
 )
 from app.services.import_export_service import ImportExportService
+from app.services.memory_service import memory_service
 from app.logger import get_logger
 from app.utils.data_consistency import (
     run_full_data_consistency_check,
@@ -143,6 +145,7 @@ async def update_project(
 @router.delete("/{project_id}", summary="删除项目")
 async def delete_project(
     project_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     try:
@@ -157,6 +160,19 @@ async def delete_project(
             raise HTTPException(status_code=404, detail="项目不存在")
         
         project_title = project.title
+        
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        
+        # 删除向量数据库中的记忆
+        if user_id:
+            try:
+                await memory_service.delete_project_memories(user_id, project_id)
+                logger.info(f"✅ 向量数据库清理成功")
+            except Exception as e:
+                logger.warning(f"⚠️ 向量数据库清理失败（继续删除其他数据）: {str(e)}")
+        else:
+            logger.warning(f"⚠️ 未找到用户ID，跳过向量数据库清理")
         
         relationships_result = await db.execute(
             delete(CharacterRelationship).where(CharacterRelationship.project_id == project_id)
@@ -200,11 +216,14 @@ async def delete_project(
         )
         logger.debug(f"删除角色数: {characters_result.rowcount}")
         
+        # 注意：StoryMemory和PlotAnalysis会通过数据库级联删除自动清理
+        # 但向量数据库已在上面手动清理
+        
         await db.delete(project)
         await db.commit()
         
         logger.info(f"项目删除成功: {project_title}")
-        return {"message": "项目及所有关联数据删除成功"}
+        return {"message": "项目及所有关联数据（包括向量数据库）删除成功"}
     except HTTPException:
         raise
     except Exception as e:

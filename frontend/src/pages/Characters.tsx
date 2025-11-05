@@ -425,6 +425,23 @@ export default function Characters() {
               >
                 <TextArea rows={2} placeholder="描述组织的宗旨和目标..." />
               </Form.Item>
+
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="所在地" name="location">
+                    <Input placeholder="组织的主要活动区域或总部位置" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="代表颜色" name="color">
+                    <Input placeholder="如：深红色、金色、黑色等" />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Form.Item label="格言/口号" name="motto">
+                <Input placeholder="组织的宗旨、格言或口号" />
+              </Form.Item>
             </>
           )}
 

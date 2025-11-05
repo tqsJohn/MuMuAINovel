@@ -974,7 +974,6 @@ export default function ProjectWizardNew() {
         styles={{
           body: {
             maxHeight: isMobile ? 'calc(100vh - 150px)' : 'calc(80vh - 110px)',
-            overflowY: 'auto'
           }
         }}
       >
@@ -1051,11 +1050,28 @@ export default function ProjectWizardNew() {
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item label="主要成员" name="organization_members">
-                    <Input placeholder="如：张三、李四、王五" />
+                  <Form.Item label="势力等级" name="power_level">
+                    <InputNumber min={0} max={100} placeholder="0-100" style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
               </Row>
+              
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="所在地" name="location">
+                    <Input placeholder="组织所在地" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="代表颜色" name="color">
+                    <Input placeholder="如：深红色、金色" />
+                  </Form.Item>
+                </Col>
+              </Row>
+              
+              <Form.Item label="格言/口号" name="motto">
+                <Input placeholder="组织的格言或口号" />
+              </Form.Item>
               
               <Form.Item
                 label="组织目的"
@@ -1063,6 +1079,10 @@ export default function ProjectWizardNew() {
                 rules={[{ required: true, message: '请输入组织目的' }]}
               >
                 <TextArea rows={2} placeholder="描述组织的宗旨和目标..." />
+              </Form.Item>
+              
+              <Form.Item label="主要成员" name="organization_members">
+                <Input placeholder="如：张三、李四、王五" />
               </Form.Item>
             </>
           )}

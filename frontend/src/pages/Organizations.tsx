@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card, Table, Tag, Button, Space, message, Modal, Form, Select, InputNumber, Input, Descriptions } from 'antd';
-import { PlusOutlined, TeamOutlined, UserOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, TeamOutlined, UserOutlined, EditOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import axios from 'axios';
+
+const { TextArea } = Input;
 
 interface Organization {
   id: string;
@@ -15,6 +17,7 @@ interface Organization {
   power_level: number;
   location?: string;
   motto?: string;
+  color?: string;
 }
 
 interface OrganizationMember {
@@ -44,7 +47,11 @@ export default function Organizations() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [loading, setLoading] = useState(false);
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
+  const [isEditOrgModalOpen, setIsEditOrgModalOpen] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [form] = Form.useForm();
+  const [editOrgForm] = Form.useForm();
+  const [generateForm] = Form.useForm();
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
   useEffect(() => {
@@ -141,6 +148,68 @@ export default function Organizations() {
           console.error(error);
         }
       }
+    });
+  };
+
+  const handleGenerateOrganization = async (values: {
+    name?: string;
+    organization_type?: string;
+    background?: string;
+    requirements?: string;
+  }) => {
+    try {
+      setIsGenerating(true);
+      await axios.post('/api/organizations/generate', {
+        project_id: projectId,
+        name: values.name,
+        organization_type: values.organization_type,
+        background: values.background,
+        requirements: values.requirements,
+      });
+      message.success('AI生成组织成功');
+      Modal.destroyAll();
+      generateForm.resetFields();
+      loadOrganizations();
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || 'AI生成失败');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const showGenerateModal = () => {
+    Modal.confirm({
+      title: 'AI生成组织',
+      width: 600,
+      centered: !isMobile,
+      content: (
+        <Form form={generateForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            label="组织名称"
+            name="name"
+          >
+            <Input placeholder="如：天剑门、黑龙会（可选，AI会自动生成）" />
+          </Form.Item>
+          <Form.Item
+            label="组织类型"
+            name="organization_type"
+          >
+            <Input placeholder="如：门派、帮派、公司、学院（可选，AI会根据世界观生成）" />
+          </Form.Item>
+          <Form.Item label="背景设定" name="background">
+            <TextArea rows={3} placeholder="简要描述组织的背景和环境..." />
+          </Form.Item>
+          <Form.Item label="其他要求" name="requirements">
+            <TextArea rows={2} placeholder="其他特殊要求..." />
+          </Form.Item>
+        </Form>
+      ),
+      okText: '生成',
+      cancelText: '取消',
+      onOk: async () => {
+        const values = await generateForm.validateFields();
+        await handleGenerateOrganization(values);
+      },
     });
   };
 
@@ -263,6 +332,17 @@ export default function Organizations() {
             {!isMobile && <Tag color="blue">{currentProject?.title}</Tag>}
           </Space>
         }
+        extra={
+          <Button
+            type="dashed"
+            icon={<ThunderboltOutlined />}
+            onClick={showGenerateModal}
+            loading={isGenerating}
+            size={isMobile ? 'small' : 'middle'}
+          >
+            AI生成组织
+          </Button>
+        }
       >
         <div style={{
           display: isMobile ? 'flex' : 'grid',
@@ -308,19 +388,53 @@ export default function Organizations() {
           <div style={{ minHeight: isMobile ? 'auto' : undefined }}>
             {selectedOrg ? (
               <Space direction="vertical" style={{ width: '100%' }} size="large">
-                <Card title="组织详情" size="small">
+                <Card
+                  title="组织详情"
+                  size="small"
+                  extra={
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<EditOutlined />}
+                      onClick={() => {
+                        editOrgForm.setFieldsValue({
+                          power_level: selectedOrg.power_level,
+                          location: selectedOrg.location,
+                          motto: selectedOrg.motto,
+                          color: selectedOrg.color
+                        });
+                        setIsEditOrgModalOpen(true);
+                      }}
+                    >
+                      编辑
+                    </Button>
+                  }
+                >
                   <Descriptions column={isMobile ? 1 : 2} size="small">
                     <Descriptions.Item label="组织名称">{selectedOrg.name}</Descriptions.Item>
                     <Descriptions.Item label="类型">{selectedOrg.type}</Descriptions.Item>
                     <Descriptions.Item label="成员数量">{selectedOrg.member_count}</Descriptions.Item>
-                    <Descriptions.Item label="势力等级">{selectedOrg.power_level}</Descriptions.Item>
+                    <Descriptions.Item label="势力等级">
+                      <Tag color={selectedOrg.power_level >= 70 ? 'red' : selectedOrg.power_level >= 50 ? 'orange' : 'default'}>
+                        {selectedOrg.power_level}
+                      </Tag>
+                    </Descriptions.Item>
                     {selectedOrg.location && (
-                      <Descriptions.Item label="所在地">{selectedOrg.location}</Descriptions.Item>
+                      <Descriptions.Item label="所在地" span={isMobile ? 1 : 2}>
+                        {selectedOrg.location}
+                      </Descriptions.Item>
+                    )}
+                    {selectedOrg.color && (
+                      <Descriptions.Item label="代表颜色">
+                        {selectedOrg.color}
+                      </Descriptions.Item>
                     )}
                     {selectedOrg.motto && (
-                      <Descriptions.Item label="宗旨" span={2}>{selectedOrg.motto}</Descriptions.Item>
+                      <Descriptions.Item label="格言/口号" span={2}>
+                        {selectedOrg.motto}
+                      </Descriptions.Item>
                     )}
-                    <Descriptions.Item label="目标/宗旨" span={2}>
+                    <Descriptions.Item label="组织目的" span={2}>
                       {selectedOrg.purpose}
                     </Descriptions.Item>
                   </Descriptions>
@@ -440,6 +554,77 @@ export default function Organizations() {
               <Button onClick={() => setIsAddMemberModalOpen(false)}>取消</Button>
               <Button type="primary" htmlType="submit">
                 添加
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 编辑组织模态框 */}
+      <Modal
+        title="编辑组织信息"
+        open={isEditOrgModalOpen}
+        onCancel={() => {
+          setIsEditOrgModalOpen(false);
+          editOrgForm.resetFields();
+        }}
+        footer={null}
+        centered={!isMobile}
+        width={isMobile ? '100%' : 500}
+        style={isMobile ? { top: 0, paddingBottom: 0, maxWidth: '100vw' } : undefined}
+        styles={isMobile ? { body: { maxHeight: 'calc(100vh - 110px)', overflowY: 'auto' } } : undefined}
+      >
+        <Form
+          form={editOrgForm}
+          layout="vertical"
+          onFinish={async (values) => {
+            if (!selectedOrg) return;
+            try {
+              await axios.put(`/api/organizations/${selectedOrg.id}`, values);
+              message.success('组织信息更新成功');
+              setIsEditOrgModalOpen(false);
+              loadOrganizations();
+            } catch (error) {
+              message.error('更新失败');
+              console.error(error);
+            }
+          }}
+        >
+          <Form.Item
+            name="power_level"
+            label="势力等级"
+            rules={[{ required: true, message: '请输入势力等级' }]}
+            tooltip="0-100的数值，表示组织的影响力"
+          >
+            <InputNumber min={0} max={100} style={{ width: '100%' }} />
+          </Form.Item>
+
+          <Form.Item
+            name="location"
+            label="所在地"
+          >
+            <Input placeholder="组织的主要活动区域或总部位置" />
+          </Form.Item>
+
+          <Form.Item
+            name="motto"
+            label="格言/口号"
+          >
+            <Input placeholder="组织的宗旨、格言或口号" />
+          </Form.Item>
+
+          <Form.Item
+            name="color"
+            label="代表颜色"
+          >
+            <Input placeholder="如：深红色、金色、黑色等" />
+          </Form.Item>
+
+          <Form.Item>
+            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <Button onClick={() => setIsEditOrgModalOpen(false)}>取消</Button>
+              <Button type="primary" htmlType="submit">
+                保存
               </Button>
             </Space>
           </Form.Item>
