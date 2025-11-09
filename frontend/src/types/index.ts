@@ -523,3 +523,84 @@ export interface TriggerAnalysisResponse {
   status: string;
   message: string;
 }
+
+// MCP 插件类型定义 - 优化后只包含必要字段
+export interface MCPPlugin {
+  id: string;
+  plugin_name: string;
+  display_name: string;
+  description?: string;
+  plugin_type: 'http' | 'stdio';
+  category: string;
+  
+  // HTTP类型字段
+  server_url?: string;
+  headers?: Record<string, string>;
+  
+  // Stdio类型字段
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  
+  // 状态字段
+  enabled: boolean;
+  status: 'active' | 'inactive' | 'error';
+  last_error?: string;
+  last_test_at?: string;
+  
+  // 时间戳
+  created_at: string;
+}
+
+export interface MCPPluginCreate {
+  plugin_name: string;
+  display_name?: string;
+  description?: string;
+  server_type: 'http' | 'stdio';
+  server_url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  enabled?: boolean;
+}
+
+export interface MCPPluginUpdate {
+  display_name?: string;
+  description?: string;
+  server_url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  enabled?: boolean;
+}
+
+export interface MCPTool {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+export interface MCPTestResult {
+  success: boolean;
+  message: string;
+  tools?: MCPTool[];
+  tools_count?: number;
+  response_time_ms?: number;
+  error?: string;
+  error_type?: string;
+  suggestions?: string[];
+}
+
+export interface MCPToolCallRequest {
+  plugin_id: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface MCPToolCallResponse {
+  success: boolean;
+  result?: unknown;
+  error?: string;
+}

@@ -1,4 +1,9 @@
 import axios from 'axios';
+
+interface MCPPluginSimpleCreate {
+  config_json: string;
+  enabled: boolean;
+}
 import { message } from 'antd';
 import { ssePost } from '../utils/sseClient';
 import type { SSEClientOptions } from '../utils/sseClient';
@@ -30,6 +35,13 @@ import type {
   WritingStyleUpdate,
   PresetStyle,
   WritingStyleListResponse,
+  MCPPlugin,
+  MCPPluginCreate,
+  MCPPluginUpdate,
+  MCPTestResult,
+  MCPTool,
+  MCPToolCallRequest,
+  MCPToolCallResponse,
 } from '../types';
 
 const api = axios.create({
@@ -428,4 +440,46 @@ export const wizardStreamApi = {
     {},
     options
   ),
+};
+
+export const mcpPluginApi = {
+  // 获取所有插件
+  getPlugins: () =>
+    api.get<unknown, MCPPlugin[]>('/mcp/plugins'),
+  
+  // 获取单个插件
+  getPlugin: (id: string) =>
+    api.get<unknown, MCPPlugin>(`/mcp/plugins/${id}`),
+  
+  // 创建插件
+  createPlugin: (data: MCPPluginCreate) =>
+    api.post<unknown, MCPPlugin>('/mcp/plugins', data),
+  
+  // 简化创建插件（通过标准MCP配置JSON）
+  createPluginSimple: (data: MCPPluginSimpleCreate) =>
+    api.post<unknown, MCPPlugin>('/mcp/plugins/simple', data),
+  
+  // 更新插件
+  updatePlugin: (id: string, data: MCPPluginUpdate) =>
+    api.put<unknown, MCPPlugin>(`/mcp/plugins/${id}`, data),
+  
+  // 删除插件
+  deletePlugin: (id: string) =>
+    api.delete<unknown, { message: string }>(`/mcp/plugins/${id}`),
+  
+  // 启用/禁用插件
+  togglePlugin: (id: string, enabled: boolean) =>
+    api.post<unknown, MCPPlugin>(`/mcp/plugins/${id}/toggle`, null, { params: { enabled } }),
+  
+  // 测试插件连接
+  testPlugin: (id: string) =>
+    api.post<unknown, MCPTestResult>(`/mcp/plugins/${id}/test`),
+  
+  // 获取插件工具列表
+  getPluginTools: (id: string) =>
+    api.get<unknown, { tools: MCPTool[] }>(`/mcp/plugins/${id}/tools`),
+  
+  // 调用工具
+  callTool: (data: MCPToolCallRequest) =>
+    api.post<unknown, MCPToolCallResponse>('/mcp/call', data),
 };

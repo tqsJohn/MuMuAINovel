@@ -1,15 +1,15 @@
 # Web框架
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-python-multipart==0.0.6
+fastapi==0.121.0
+uvicorn[standard]==0.38.0
+python-multipart==0.0.20
 
 # 数据库
 sqlalchemy==2.0.25
 aiosqlite==0.19.0
 
 # 数据验证
-pydantic==2.5.3
-pydantic-settings==2.1.0
+pydantic==2.12.4
+pydantic-settings==2.11.0
 
 # AI服务
 openai==2.7.0
@@ -18,6 +18,9 @@ anthropic==0.72.0
 # 工具库
 httpx==0.28.1
 python-dotenv==1.0.0
+# MCP官方库（Model Context Protocol Python SDK）
+mcp==1.21.0
+
 
 # NumPy版本锁定（兼容性要求）
 numpy==1.26.4

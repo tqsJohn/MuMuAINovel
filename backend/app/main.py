@@ -12,6 +12,7 @@ from app.database import close_db, _session_stats
 from app.logger import setup_logging, get_logger
 from app.middleware import RequestIDMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
+from app.mcp.registry import mcp_registry
 
 setup_logging(
     level=config_settings.log_level,
@@ -27,8 +28,12 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("应用启动，等待用户登录...")
+    logger.info("💡 MCP插件采用延迟加载策略，将在用户首次使用时自动加载")
     
     yield
+    
+    # 清理MCP插件
+    await mcp_registry.cleanup_all()
     await close_db()
     logger.info("应用已关闭")
 
@@ -114,7 +119,8 @@ async def db_session_stats():
 from app.api import (
     projects, outlines, characters, chapters,
     wizard_stream, relationships, organizations,
-    auth, users, settings, writing_styles, memories
+    auth, users, settings, writing_styles, memories,
+    mcp_plugins
 )
 
 app.include_router(auth.router, prefix="/api")
@@ -130,6 +136,7 @@ app.include_router(relationships.router, prefix="/api")
 app.include_router(organizations.router, prefix="/api")
 app.include_router(writing_styles.router, prefix="/api")
 app.include_router(memories.router)  # 记忆管理API (已包含/api前缀)
+app.include_router(mcp_plugins.router, prefix="/api")  # MCP插件管理API
 
 static_dir = Path(__file__).parent.parent / "static"
 if static_dir.exists():

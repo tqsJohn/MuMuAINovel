@@ -242,10 +242,8 @@ async def get_available_models(
                 if "data" in data and isinstance(data["data"], list):
                     for model in data["data"]:
                         model_id = model.get("id", "")
-                        # 过滤出常用的文本生成模型
-                        if any(keyword in model_id.lower() for keyword in [
-                            "gpt", "gemini", "claude", "llama", "mistral", "qwen", "deepseek"
-                        ]):
+                        # 返回所有模型，不进行过滤
+                        if model_id:
                             models.append({
                                 "value": model_id,
                                 "label": model_id,
@@ -359,7 +357,10 @@ async def test_api_connection(data: ApiTestRequest):
         
         logger.info(f"✅ API 测试成功")
         logger.info(f"  - 响应时间: {response_time}ms")
-        logger.info(f"  - 响应内容: {response[:100] if response else 'N/A'}")
+        
+        # 安全地处理响应内容（确保是字符串）
+        response_str = str(response) if response else 'N/A'
+        logger.info(f"  - 响应内容: {response_str[:100]}")
         
         return {
             "success": True,
@@ -367,7 +368,7 @@ async def test_api_connection(data: ApiTestRequest):
             "response_time_ms": response_time,
             "provider": provider,
             "model": llm_model,
-            "response_preview": response[:100] if response and len(response) > 100 else response,
+            "response_preview": response_str[:100] if len(response_str) > 100 else response_str,
             "details": {
                 "api_available": True,
                 "model_accessible": True,

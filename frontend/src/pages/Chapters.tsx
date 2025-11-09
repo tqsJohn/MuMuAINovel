@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, Tooltip, InputNumber } from 'antd';
-import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, Tooltip, InputNumber, Progress, Alert, Radio } from 'antd';
+import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useChapterSync } from '../store/hooks';
 import { projectApi, writingStyleApi } from '../services/api';
@@ -29,6 +29,19 @@ export default function Chapters() {
   // 分析任务状态管理
   const [analysisTasksMap, setAnalysisTasksMap] = useState<Record<string, AnalysisTask>>({});
   const pollingIntervalsRef = useRef<Record<string, number>>({});
+  
+  // 批量生成相关状态
+  const [batchGenerateVisible, setBatchGenerateVisible] = useState(false);
+  const [batchGenerating, setBatchGenerating] = useState(false);
+  const [batchTaskId, setBatchTaskId] = useState<string | null>(null);
+  const [batchProgress, setBatchProgress] = useState<{
+    status: string;
+    total: number;
+    completed: number;
+    current_chapter_number: number | null;
+    estimated_time_minutes?: number;
+  } | null>(null);
+  const batchPollingIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -50,6 +63,7 @@ export default function Chapters() {
       refreshChapters();
       loadWritingStyles();
       loadAnalysisTasks();
+      checkAndRestoreBatchTask();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject?.id]);
@@ -60,6 +74,9 @@ export default function Chapters() {
       Object.values(pollingIntervalsRef.current).forEach(interval => {
         clearInterval(interval);
       });
+      if (batchPollingIntervalRef.current) {
+        clearInterval(batchPollingIntervalRef.current);
+      }
     };
   }, []);
 
@@ -154,6 +171,40 @@ export default function Chapters() {
     } catch (error) {
       console.error('加载写作风格失败:', error);
       message.error('加载写作风格失败');
+    }
+  };
+
+  // 检查并恢复批量生成任务
+  const checkAndRestoreBatchTask = async () => {
+    if (!currentProject?.id) return;
+    
+    try {
+      const response = await fetch(`/api/chapters/project/${currentProject.id}/batch-generate/active`);
+      if (!response.ok) return;
+      
+      const data = await response.json();
+      
+      if (data.has_active_task && data.task) {
+        const task = data.task;
+        
+        // 恢复任务状态
+        setBatchTaskId(task.batch_id);
+        setBatchProgress({
+          status: task.status,
+          total: task.total,
+          completed: task.completed,
+          current_chapter_number: task.current_chapter_number,
+        });
+        setBatchGenerating(true);
+        setBatchGenerateVisible(true);
+        
+        // 启动轮询
+        startBatchPolling(task.batch_id);
+        
+        message.info('检测到未完成的批量生成任务，已自动恢复');
+      }
+    } catch (error) {
+      console.error('检查批量生成任务失败:', error);
     }
   };
 
@@ -436,6 +487,168 @@ export default function Chapters() {
     setAnalysisVisible(true);
   };
 
+  // 批量生成函数
+  const handleBatchGenerate = async (values: {
+    startChapterNumber: number;
+    count: number;
+    enableAnalysis: boolean;
+    styleId?: number;
+    targetWordCount?: number;
+  }) => {
+    if (!currentProject?.id) return;
+    
+    // 使用批量生成对话框中选择的风格和字数，如果没有选择则使用默认值
+    const styleId = values.styleId || selectedStyleId;
+    const wordCount = values.targetWordCount || targetWordCount;
+    
+    if (!styleId) {
+      message.error('请选择写作风格');
+      return;
+    }
+    
+    try {
+      setBatchGenerating(true);
+      
+      const response = await fetch(`/api/chapters/project/${currentProject.id}/batch-generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          start_chapter_number: values.startChapterNumber,
+          count: values.count,
+          enable_analysis: values.enableAnalysis,
+          style_id: styleId,
+          target_word_count: wordCount,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || '创建批量生成任务失败');
+      }
+      
+      const result = await response.json();
+      setBatchTaskId(result.batch_id);
+      setBatchProgress({
+        status: 'running',
+        total: result.chapters_to_generate.length,
+        completed: 0,
+        current_chapter_number: values.startChapterNumber,
+        estimated_time_minutes: result.estimated_time_minutes,
+      });
+      
+      message.success(`批量生成任务已创建，预计需要 ${result.estimated_time_minutes} 分钟`);
+      
+      // 开始轮询任务状态
+      startBatchPolling(result.batch_id);
+      
+    } catch (error: any) {
+      message.error('创建批量生成任务失败：' + (error.message || '未知错误'));
+      setBatchGenerating(false);
+      setBatchGenerateVisible(false);
+    }
+  };
+
+  // 轮询批量生成任务状态
+  const startBatchPolling = (taskId: string) => {
+    if (batchPollingIntervalRef.current) {
+      clearInterval(batchPollingIntervalRef.current);
+    }
+    
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/chapters/batch-generate/${taskId}/status`);
+        if (!response.ok) return;
+        
+        const status = await response.json();
+        setBatchProgress({
+          status: status.status,
+          total: status.total,
+          completed: status.completed,
+          current_chapter_number: status.current_chapter_number,
+        });
+        
+        // 任务完成或失败，停止轮询
+        if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+          if (batchPollingIntervalRef.current) {
+            clearInterval(batchPollingIntervalRef.current);
+            batchPollingIntervalRef.current = null;
+          }
+          
+          setBatchGenerating(false);
+          
+          if (status.status === 'completed') {
+            message.success(`批量生成完成！成功生成 ${status.completed} 章`);
+            // 刷新章节列表
+            refreshChapters();
+            loadAnalysisTasks();
+          } else if (status.status === 'failed') {
+            message.error(`批量生成失败：${status.error_message || '未知错误'}`);
+          } else if (status.status === 'cancelled') {
+            message.warning('批量生成已取消');
+          }
+          
+          // 延迟关闭对话框，让用户看到最终状态
+          setTimeout(() => {
+            setBatchGenerateVisible(false);
+            setBatchTaskId(null);
+            setBatchProgress(null);
+          }, 2000);
+        }
+      } catch (error) {
+        console.error('轮询批量生成状态失败:', error);
+      }
+    };
+    
+    // 立即执行一次
+    poll();
+    
+    // 每2秒轮询一次
+    batchPollingIntervalRef.current = window.setInterval(poll, 2000);
+  };
+
+  // 取消批量生成
+  const handleCancelBatchGenerate = async () => {
+    if (!batchTaskId) return;
+    
+    try {
+      const response = await fetch(`/api/chapters/batch-generate/${batchTaskId}/cancel`, {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        throw new Error('取消失败');
+      }
+      
+      message.success('批量生成已取消');
+    } catch (error: any) {
+      message.error('取消失败：' + (error.message || '未知错误'));
+    }
+  };
+
+  // 打开批量生成对话框
+  const handleOpenBatchGenerate = () => {
+    // 找到第一个未生成的章节
+    const firstIncompleteChapter = sortedChapters.find(
+      ch => !ch.content || ch.content.trim() === ''
+    );
+    
+    if (!firstIncompleteChapter) {
+      message.info('所有章节都已生成内容');
+      return;
+    }
+    
+    // 检查该章节是否可以生成
+    if (!canGenerateChapter(firstIncompleteChapter)) {
+      const reason = getGenerateDisabledReason(firstIncompleteChapter);
+      message.warning(reason);
+      return;
+    }
+    
+    setBatchGenerateVisible(true);
+  };
+
   // 渲染分析状态标签
   const renderAnalysisStatus = (chapterId: string) => {
     const task = analysisTasksMap[chapterId];
@@ -496,6 +709,17 @@ export default function Chapters() {
         <Space direction={isMobile ? 'vertical' : 'horizontal'} style={{ width: isMobile ? '100%' : 'auto' }}>
           <Button
             type="primary"
+            icon={<RocketOutlined />}
+            onClick={handleOpenBatchGenerate}
+            disabled={chapters.length === 0}
+            block={isMobile}
+            size={isMobile ? 'middle' : 'middle'}
+            style={{ background: '#722ed1', borderColor: '#722ed1' }}
+          >
+            批量生成
+          </Button>
+          <Button
+            type="default"
             icon={<DownloadOutlined />}
             onClick={handleExport}
             disabled={chapters.length === 0}
@@ -914,6 +1138,245 @@ export default function Chapters() {
           }}
         />
       )}
+
+      {/* 批量生成对话框 */}
+      <Modal
+        title={
+          <Space>
+            <RocketOutlined style={{ color: '#722ed1' }} />
+            <span>批量生成章节内容</span>
+          </Space>
+        }
+        open={batchGenerateVisible}
+        onCancel={() => {
+          if (batchGenerating) {
+            Modal.confirm({
+              title: '确认取消',
+              content: '批量生成正在进行中，确定要取消吗？',
+              okText: '确定取消',
+              cancelText: '继续生成',
+              onOk: () => {
+                handleCancelBatchGenerate();
+                setBatchGenerateVisible(false);
+              },
+            });
+          } else {
+            setBatchGenerateVisible(false);
+          }
+        }}
+        footer={null}
+        width={600}
+        centered
+        closable={!batchGenerating}
+        maskClosable={!batchGenerating}
+      >
+        {!batchGenerating ? (
+          <Form
+            layout="vertical"
+            onFinish={handleBatchGenerate}
+            initialValues={{
+              startChapterNumber: sortedChapters.find(ch => !ch.content || ch.content.trim() === '')?.chapter_number || 1,
+              count: 5,
+              enableAnalysis: false,
+              styleId: selectedStyleId,
+              targetWordCount: 3000,
+            }}
+          >
+            <Alert
+              message="批量生成说明"
+              description={
+                <ul style={{ margin: '8px 0 0 0', paddingLeft: 20 }}>
+                  <li>严格按章节序号顺序生成，不可跳过</li>
+                  <li>所有章节使用相同的写作风格和目标字数</li>
+                  <li>任一章节失败则终止后续生成</li>
+                </ul>
+              }
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+
+            <Form.Item
+              label="起始章节"
+              name="startChapterNumber"
+              rules={[{ required: true, message: '请选择起始章节' }]}
+            >
+              <Select placeholder="选择起始章节" size="large">
+                {sortedChapters
+                  .filter(ch => !ch.content || ch.content.trim() === '')
+                  .filter(ch => canGenerateChapter(ch))
+                  .map(ch => (
+                    <Select.Option key={ch.id} value={ch.chapter_number}>
+                      第{ch.chapter_number}章：{ch.title}
+                    </Select.Option>
+                  ))}
+              </Select>
+            </Form.Item>
+
+            <Form.Item
+              label="生成数量"
+              name="count"
+              rules={[{ required: true, message: '请选择生成数量' }]}
+            >
+              <Radio.Group buttonStyle="solid" size="large">
+                <Radio.Button value={5}>5章</Radio.Button>
+                <Radio.Button value={10}>10章</Radio.Button>
+                <Radio.Button value={15}>15章</Radio.Button>
+                <Radio.Button value={20}>20章</Radio.Button>
+              </Radio.Group>
+            </Form.Item>
+
+            <Form.Item
+              label="写作风格"
+              name="styleId"
+              rules={[{ required: true, message: '请选择写作风格' }]}
+              tooltip="批量生成时所有章节使用相同的写作风格"
+            >
+              <Select
+                placeholder="请选择写作风格"
+                size="large"
+                showSearch
+                optionFilterProp="children"
+              >
+                {writingStyles.map(style => (
+                  <Select.Option key={style.id} value={style.id}>
+                    {style.name}
+                    {style.is_default && ' (默认)'}
+                    {style.description && ` - ${style.description}`}
+                  </Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+
+            <Form.Item
+              label="目标字数"
+              tooltip="AI生成章节时的目标字数，实际生成字数可能略有偏差"
+            >
+              <Form.Item
+                name="targetWordCount"
+                rules={[{ required: true, message: '请设置目标字数' }]}
+                noStyle
+              >
+                <InputNumber
+                  min={500}
+                  max={10000}
+                  step={100}
+                  size="large"
+                  style={{ width: '100%' }}
+                  formatter={(value) => `${value} 字`}
+                  parser={(value) => value?.replace(' 字', '') as any}
+                />
+              </Form.Item>
+              <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>
+                建议范围：500-10000字，默认3000字
+              </div>
+            </Form.Item>
+
+            <Form.Item
+              label="同步分析"
+              name="enableAnalysis"
+              tooltip="开启后每章生成完立即分析，会增加约50%耗时，但能提升后续章节质量"
+            >
+              <Radio.Group>
+                <Radio value={false}>
+                  <Space direction="vertical" size={0}>
+                    <span>不分析（推荐）</span>
+                    <span style={{ fontSize: 12, color: '#666' }}>生成更快，后续可手动分析</span>
+                  </Space>
+                </Radio>
+                <Radio value={true}>
+                  <Space direction="vertical" size={0}>
+                    <span>同步分析</span>
+                    <span style={{ fontSize: 12, color: '#ff9800' }}>增加约50%耗时，提升质量</span>
+                  </Space>
+                </Radio>
+              </Radio.Group>
+            </Form.Item>
+
+            <Form.Item>
+              <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+                <Button onClick={() => setBatchGenerateVisible(false)}>
+                  取消
+                </Button>
+                <Button type="primary" htmlType="submit" icon={<RocketOutlined />}>
+                  开始批量生成
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        ) : (
+          <div>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span>生成进度：</span>
+                <span>
+                  <strong style={{ color: '#1890ff', fontSize: 18 }}>
+                    {batchProgress?.completed || 0} / {batchProgress?.total || 0}
+                  </strong>
+                  章
+                </span>
+              </div>
+              <Progress
+                percent={batchProgress ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0}
+                status={batchProgress?.status === 'failed' ? 'exception' : 'active'}
+                strokeColor={{
+                  '0%': '#722ed1',
+                  '100%': '#1890ff',
+                }}
+              />
+            </div>
+
+            {batchProgress?.current_chapter_number && (
+              <Alert
+                message={`正在生成第 ${batchProgress.current_chapter_number} 章...`}
+                type="info"
+                showIcon
+                icon={<SyncOutlined spin />}
+                style={{ marginBottom: 16 }}
+              />
+            )}
+
+            {batchProgress?.estimated_time_minutes && batchProgress.completed === 0 && (
+              <div style={{ marginBottom: 16, color: '#666', fontSize: 13 }}>
+                ⏱️ 预计耗时：约 {batchProgress.estimated_time_minutes} 分钟
+              </div>
+            )}
+
+            <Alert
+              message="温馨提示"
+              description={
+                <ul style={{ margin: '8px 0 0 0', paddingLeft: 20 }}>
+                  <li>批量生成需要一定时间，可以切换到其他页面</li>
+                  <li>关闭页面后重新打开，会自动恢复任务进度</li>
+                  <li>可以随时点击"取消任务"按钮中止生成</li>
+                </ul>
+              }
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+
+            <div style={{ textAlign: 'center' }}>
+              <Button
+                danger
+                icon={<StopOutlined />}
+                onClick={() => {
+                  Modal.confirm({
+                    title: '确认取消',
+                    content: '确定要取消批量生成吗？已生成的章节将保留。',
+                    okText: '确定取消',
+                    cancelText: '继续生成',
+                    okButtonProps: { danger: true },
+                    onOk: handleCancelBatchGenerate,
+                  });
+                }}
+              >
+                取消任务
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

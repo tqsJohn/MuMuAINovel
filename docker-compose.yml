@@ -1,10 +1,10 @@
 services:
-  ai-story:
+  mumuainovel:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ai-story-creator:latest
-    container_name: ai-story-creator
+    image: mumujie/mumuainovel:latest
+    container_name: mumuainovel
     ports:
       - "8000:8000"
     volumes:

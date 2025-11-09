@@ -1,5 +1,5 @@
 """项目创建向导流式API - 使用SSE避免超时"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Dict, Any, AsyncGenerator
@@ -15,6 +15,7 @@ from app.models.relationship import CharacterRelationship, Organization, Organiz
 from app.models.writing_style import WritingStyle
 from app.models.project_default_style import ProjectDefaultStyle
 from app.services.ai_service import AIService
+from app.services.mcp_tool_service import MCPToolService
 from app.services.prompt_service import prompt_service
 from app.logger import get_logger
 from app.utils.sse_response import SSEResponse, create_sse_response
@@ -29,7 +30,7 @@ async def world_building_generator(
     db: AsyncSession,
     user_ai_service: AIService
 ) -> AsyncGenerator[str, None]:
-    """世界构建流式生成器"""
+    """世界构建流式生成器 - 支持MCP工具增强"""
     # 标记数据库会话是否已提交
     db_committed = False
     try:
@@ -47,27 +48,94 @@ async def world_building_generator(
         character_count = data.get("character_count")
         provider = data.get("provider")
         model = data.get("model")
+        enable_mcp = data.get("enable_mcp", True)  # 默认启用MCP
+        user_id = data.get("user_id")  # 从中间件注入
         
         if not title or not description or not theme or not genre:
             yield await SSEResponse.send_error("title、description、theme 和 genre 是必需的参数", 400)
             return
         
-        # 获取提示词
-        yield await SSEResponse.send_progress("准备AI提示词...", 20)
-        prompt = prompt_service.get_world_building_prompt(
+        # 获取基础提示词
+        yield await SSEResponse.send_progress("准备AI提示词...", 15)
+        base_prompt = prompt_service.get_world_building_prompt(
             title=title,
             theme=theme,
             genre=genre
         )
         
-        # 流式调用AI
-        yield await SSEResponse.send_progress("正在调用AI生成...", 30)
+        # MCP工具增强：收集参考资料
+        reference_materials = ""
+        if enable_mcp and user_id:
+            try:
+                yield await SSEResponse.send_progress("🔍 尝试使用MCP工具收集参考资料...", 18)
+                
+                # 直接调用MCP增强的AI，内部会自动检查和加载工具
+                # 构建资料收集提示词
+                planning_prompt = f"""你正在为小说《{title}》设计世界观。
+
+【小说信息】
+- 题材：{genre}
+- 主题：{theme}
+- 简介：{description}
+
+【任务】
+请使用可用工具搜索相关背景资料，帮助构建更真实、更有深度的世界观设定。
+你可以查询：
+1. 历史背景（如果是历史题材）
+2. 地理环境和文化特征
+3. 相关领域的专业知识
+4. 类似作品的设定参考
+
+请根据题材特点，有针对性地查询2-3个关键问题。"""
+                    
+                # 调用MCP增强的AI（非流式，最多2轮工具调用）
+                planning_result = await user_ai_service.generate_text_with_mcp(
+                    prompt=planning_prompt,
+                    user_id=user_id,
+                    db_session=db,
+                    enable_mcp=True,
+                    max_tool_rounds=2,
+                    tool_choice="auto",
+                    provider=None,
+                    model=None
+                )
+                
+                # 提取参考资料
+                if planning_result.get("tool_calls_made", 0) > 0:
+                    yield await SSEResponse.send_progress(
+                        f"✅ MCP工具调用成功（{planning_result['tool_calls_made']}次）",
+                        25
+                    )
+                    reference_materials = planning_result.get("content", "")
+                else:
+                    yield await SSEResponse.send_progress("ℹ️ 未使用MCP工具（无可用工具或不需要）", 25)
+                    
+            except Exception as e:
+                logger.warning(f"MCP工具调用失败（降级处理）: {e}")
+                yield await SSEResponse.send_progress("⚠️ MCP工具暂时不可用，使用基础模式", 25)
         
+        # 构建增强提示词
+        if reference_materials:
+            enhanced_prompt = f"""{base_prompt}
+
+【参考资料】
+以下是通过MCP工具收集的真实背景资料，请参考这些信息构建更真实的世界观：
+
+{reference_materials}
+
+请结合上述资料，生成符合历史/现实的世界观设定。"""
+            final_prompt = enhanced_prompt
+            yield await SSEResponse.send_progress("💡 已整合参考资料，开始生成世界观...", 30)
+        else:
+            final_prompt = base_prompt
+            yield await SSEResponse.send_progress("正在调用AI生成...", 30)
+        
+        # 流式生成世界观
         accumulated_text = ""
         chunk_count = 0
         
         async for chunk in user_ai_service.generate_text_stream(
-            prompt=prompt,
+            prompt=final_prompt,
             provider=provider,
             model=model
         ):
@@ -190,6 +258,7 @@ async def world_building_generator(
 
 @router.post("/world-building", summary="流式生成世界构建")
 async def generate_world_building_stream(
+    request: Request,
     data: Dict[str, Any],
     db: AsyncSession = Depends(get_db),
     user_ai_service: AIService = Depends(get_user_ai_service)
@@ -198,6 +267,10 @@ async def generate_world_building_stream(
     使用SSE流式生成世界构建，避免超时
     前端使用EventSource接收实时进度和结果
     """
+    # 从中间件注入user_id到data中
+    if hasattr(request.state, 'user_id'):
+        data['user_id'] = request.state.user_id
+    
     return create_sse_response(world_building_generator(data, db, user_ai_service))
 
 
@@ -206,7 +279,7 @@ async def characters_generator(
     db: AsyncSession,
     user_ai_service: AIService
 ) -> AsyncGenerator[str, None]:
-    """角色批量生成流式生成器 - 优化版:分批+重试"""
+    """角色批量生成流式生成器 - 优化版:分批+重试+MCP工具增强"""
     db_committed = False
     try:
         yield await SSEResponse.send_progress("开始生成角色...", 5)
@@ -219,6 +292,8 @@ async def characters_generator(
         requirements = data.get("requirements", "")
         provider = data.get("provider")
         model = data.get("model")
+        enable_mcp = data.get("enable_mcp", True)  # 默认启用MCP
+        user_id = data.get("user_id")  # 从中间件注入
         
         # 验证项目
         yield await SSEResponse.send_progress("验证项目...", 10)
@@ -238,6 +313,57 @@ async def characters_generator(
             "atmosphere": project.world_atmosphere or "未设定",
             "rules": project.world_rules or "未设定"
         }
+        
+        # MCP工具增强：收集角色参考资料
+        character_reference_materials = ""
+        if enable_mcp and user_id:
+            try:
+                yield await SSEResponse.send_progress("🔍 尝试使用MCP工具收集角色参考资料...", 8)
+                
+                # 构建角色资料收集提示词
+                planning_prompt = f"""你正在为小说《{project.title}》设计角色。
+
+【小说信息】
+- 题材：{genre or project.genre}
+- 主题：{theme or project.theme}
+- 时代背景：{world_context.get('time_period', '未设定')}
+- 地理位置：{world_context.get('location', '未设定')}
+
+【任务】
+请使用可用工具搜索相关参考资料，帮助设计更真实、更有深度的角色。
+你可以查询：
+1. 该时代/地域的真实历史人物特征
+2. 文化背景和社会习俗
+3. 职业特点和生活方式
+4. 相关领域的人物原型
+
+请根据题材特点，有针对性地查询1-2个关键问题。"""
+                
+                # 调用MCP增强的AI（非流式，最多2轮工具调用）
+                planning_result = await user_ai_service.generate_text_with_mcp(
+                    prompt=planning_prompt,
+                    user_id=user_id,
+                    db_session=db,
+                    enable_mcp=True,
+                    max_tool_rounds=2,
+                    tool_choice="auto",
+                    provider=None,
+                    model=None
+                )
+                
+                # 提取参考资料
+                if planning_result.get("tool_calls_made", 0) > 0:
+                    yield await SSEResponse.send_progress(
+                        f"✅ MCP工具调用成功（{planning_result['tool_calls_made']}次）",
+                        12
+                    )
+                    character_reference_materials = planning_result.get("content", "")
+                else:
+                    yield await SSEResponse.send_progress("ℹ️ 未使用MCP工具（无可用工具或不需要）", 12)
+                    
+            except Exception as e:
+                logger.warning(f"MCP工具调用失败（降级处理）: {e}")
+                yield await SSEResponse.send_progress("⚠️ MCP工具暂时不可用，使用基础模式", 12)
         
         # 优化的分批策略:每批生成3个,平衡效率和成功率
         BATCH_SIZE = 3  # 每批生成3个角色
@@ -291,7 +417,8 @@ async def characters_generator(
                         else:
                             batch_requirements += "\n主要是配角(supporting)和反派(antagonist)"
                     
-                    prompt = prompt_service.get_characters_batch_prompt(
+                    # 构建基础提示词
+                    base_prompt = prompt_service.get_characters_batch_prompt(
                         count=current_batch_size,  # 传递精确数量
                         time_period=world_context.get("time_period", ""),
                         location=world_context.get("location", ""),
@@ -301,6 +428,19 @@ async def characters_generator(
                         genre=genre or project.genre or "",
                         requirements=batch_requirements
                     )
+                    
+                    # 如果有MCP参考资料，增强提示词
+                    if character_reference_materials:
+                        prompt = f"""{base_prompt}
+
+【参考资料】
+以下是通过MCP工具收集的真实背景资料，请参考这些信息设计更真实的角色：
+
+{character_reference_materials}
+
+请结合上述资料，设计符合历史/文化背景的角色。"""
+                    else:
+                        prompt = base_prompt
                     
                     # 流式生成
                     accumulated_text = ""
@@ -708,13 +848,19 @@ async def characters_generator(
 
 @router.post("/characters", summary="流式批量生成角色")
 async def generate_characters_stream(
+    request: Request,
     data: Dict[str, Any],
     db: AsyncSession = Depends(get_db),
     user_ai_service: AIService = Depends(get_user_ai_service)
 ):
     """
     使用SSE流式批量生成角色，避免超时
+    支持MCP工具增强
     """
+    # 从中间件注入user_id到data中
+    if hasattr(request.state, 'user_id'):
+        data['user_id'] = request.state.user_id
+    
     return create_sse_response(characters_generator(data, db, user_ai_service))
 
 
@@ -1071,7 +1217,7 @@ async def regenerate_world_building_generator(
     db: AsyncSession,
     user_ai_service: AIService
 ) -> AsyncGenerator[str, None]:
-    """重新生成世界观流式生成器"""
+    """重新生成世界观流式生成器 - 支持MCP工具增强"""
     db_committed = False
     try:
         yield await SSEResponse.send_progress("开始重新生成世界观...", 10)
@@ -1087,23 +1233,89 @@ async def regenerate_world_building_generator(
         
         provider = data.get("provider")
         model = data.get("model")
+        enable_mcp = data.get("enable_mcp", True)  # 默认启用MCP
+        user_id = data.get("user_id")  # 从中间件注入
         
-        # 获取世界构建提示词
-        yield await SSEResponse.send_progress("准备AI提示词...", 20)
-        prompt = prompt_service.get_world_building_prompt(
+        # 获取基础提示词
+        yield await SSEResponse.send_progress("准备AI提示词...", 15)
+        base_prompt = prompt_service.get_world_building_prompt(
             title=project.title,
             theme=project.theme or "",
             genre=project.genre or ""
         )
         
-        # 流式调用AI
-        yield await SSEResponse.send_progress("正在调用AI生成...", 30)
+        # MCP工具增强：收集参考资料
+        reference_materials = ""
+        if enable_mcp and user_id:
+            try:
+                yield await SSEResponse.send_progress("🔍 尝试使用MCP工具收集参考资料...", 18)
+                
+                # 直接调用MCP增强的AI，内部会自动检查和加载工具
+                # 构建资料收集提示词
+                planning_prompt = f"""你正在为小说《{project.title}》重新设计世界观。
+
+【小说信息】
+- 题材：{project.genre or '未设定'}
+- 主题：{project.theme or '未设定'}
+
+【任务】
+请使用可用工具搜索相关背景资料，帮助构建更真实、更有深度的世界观设定。
+你可以查询：
+1. 历史背景（如果是历史题材）
+2. 地理环境和文化特征
+3. 相关领域的专业知识
+4. 类似作品的设定参考
+
+请根据题材特点，有针对性地查询2-3个关键问题。"""
+                    
+                # 调用MCP增强的AI（非流式，最多2轮工具调用）
+                planning_result = await user_ai_service.generate_text_with_mcp(
+                    prompt=planning_prompt,
+                    user_id=user_id,
+                    db_session=db,
+                    enable_mcp=True,
+                    max_tool_rounds=2,
+                    tool_choice="auto",
+                    provider=None,
+                    model=None
+                )
+                
+                # 提取参考资料
+                if planning_result.get("tool_calls_made", 0) > 0:
+                    yield await SSEResponse.send_progress(
+                        f"✅ MCP工具调用成功（{planning_result['tool_calls_made']}次）",
+                        25
+                    )
+                    reference_materials = planning_result.get("content", "")
+                else:
+                    yield await SSEResponse.send_progress("ℹ️ 未使用MCP工具（无可用工具或不需要）", 25)
+                    
+            except Exception as e:
+                logger.warning(f"MCP工具调用失败（降级处理）: {e}")
+                yield await SSEResponse.send_progress("⚠️ MCP工具暂时不可用，使用基础模式", 25)
         
+        # 构建增强提示词
+        if reference_materials:
+            enhanced_prompt = f"""{base_prompt}
+
+【参考资料】
+以下是通过MCP工具收集的真实背景资料，请参考这些信息构建更真实的世界观：
+
+{reference_materials}
+
+请结合上述资料，生成符合历史/现实的世界观设定。"""
+            final_prompt = enhanced_prompt
+            yield await SSEResponse.send_progress("💡 已整合参考资料，开始重新生成世界观...", 30)
+        else:
+            final_prompt = base_prompt
+            yield await SSEResponse.send_progress("正在调用AI生成...", 30)
+        
+        # 流式生成世界观
         accumulated_text = ""
         chunk_count = 0
         
         async for chunk in user_ai_service.generate_text_stream(
-            prompt=prompt,
+            prompt=final_prompt,
             provider=provider,
             model=model
         ):
@@ -1187,6 +1399,7 @@ async def regenerate_world_building_generator(
 
 @router.post("/world-building/{project_id}/regenerate", summary="流式重新生成世界观")
 async def regenerate_world_building_stream(
+    request: Request,
     project_id: str,
     data: Dict[str, Any],
     db: AsyncSession = Depends(get_db),
@@ -1200,6 +1413,10 @@ async def regenerate_world_building_stream(
         "model": "模型名称（可选）"
     }
     """
+    # 从中间件注入user_id到data中
+    if hasattr(request.state, 'user_id'):
+        data['user_id'] = request.state.user_id
+    
     return create_sse_response(regenerate_world_building_generator(project_id, data, db, user_ai_service))
 
 

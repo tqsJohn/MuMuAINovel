@@ -5,6 +5,7 @@ from anthropic import AsyncAnthropic
 from app.config import settings as app_settings
 from app.logger import get_logger
 import httpx
+import json
 
 logger = get_logger(__name__)
 
@@ -126,10 +127,12 @@ class AIService:
         model: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        system_prompt: Optional[str] = None
-    ) -> str:
+        system_prompt: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        生成文本
+        生成文本（支持工具调用）
         
         Args:
             prompt: 用户提示词
@@ -138,9 +141,14 @@ class AIService:
             temperature: 温度参数
             max_tokens: 最大token数
             system_prompt: 系统提示词
+            tools: 可用工具列表（MCP工具格式）
+            tool_choice: 工具选择策略 (auto/required/none)
             
         Returns:
-            生成的文本
+            Dict包含:
+            - content: 文本内容（如果没有工具调用）
+            - tool_calls: 工具调用列表（如果AI决定调用工具）
+            - finish_reason: 完成原因
         """
         provider = provider or self.api_provider
         model = model or self.default_model
@@ -148,12 +156,12 @@ class AIService:
         max_tokens = max_tokens or self.default_max_tokens
         
         if provider == "openai":
-            return await self._generate_openai(
-                prompt, model, temperature, max_tokens, system_prompt
+            return await self._generate_openai_with_tools(
+                prompt, model, temperature, max_tokens, system_prompt, tools, tool_choice
             )
         elif provider == "anthropic":
-            return await self._generate_anthropic(
-                prompt, model, temperature, max_tokens, system_prompt
+            return await self._generate_anthropic_with_tools(
+                prompt, model, temperature, max_tokens, system_prompt, tools, tool_choice
             )
         else:
             raise ValueError(f"不支持的AI提供商: {provider}")
@@ -247,6 +255,7 @@ class AIService:
             logger.info(f"✅ OpenAI API调用成功")
             logger.info(f"  - 响应ID: {data.get('id', 'N/A')}")
             logger.info(f"  - 选项数量: {len(data.get('choices', []))}")
+            logger.debug(f"  - 完整API响应: {data}")
             
             if not data.get('choices'):
                 logger.error("❌ OpenAI返回的choices为空")
@@ -294,6 +303,173 @@ class AIService:
             logger.error(f"  - 模型: {model}")
             raise
     
+
+    async def _generate_openai_with_tools(
+        self,
+        prompt: str,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        system_prompt: Optional[str],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """使用OpenAI生成文本（支持工具调用）"""
+        if not self.openai_http_client:
+            raise ValueError("OpenAI客户端未初始化，请检查API key配置")
+        
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        try:
+            logger.info(f"🔵 开始调用OpenAI API（支持工具调用）")
+            logger.info(f"  - 模型: {model}")
+            logger.info(f"  - 工具数量: {len(tools) if tools else 0}")
+            
+            url = f"{self.openai_base_url}/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self.openai_api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens
+            }
+            
+            # 添加工具参数
+            if tools:
+                payload["tools"] = tools
+                if tool_choice:
+                    if tool_choice == "required":
+                        payload["tool_choice"] = "required"
+                    elif tool_choice == "auto":
+                        payload["tool_choice"] = "auto"
+                    elif tool_choice == "none":
+                        payload["tool_choice"] = "none"
+            
+            response = await self.openai_http_client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            logger.info(f"✅ OpenAI API调用成功")
+            logger.debug(f"  - 完整API响应: {data}")
+            
+            if not data.get('choices'):
+                logger.error(f"❌ API返回的choices为空")
+                logger.error(f"  - 完整响应: {data}")
+                logger.error(f"  - 响应键: {list(data.keys())}")
+                raise ValueError(f"API返回的响应格式错误：choices字段为空。完整响应: {data}")
+            
+            choice = data['choices'][0]
+            message = choice.get('message', {})
+            finish_reason = choice.get('finish_reason')
+            
+            # 检查是否有工具调用
+            tool_calls = message.get('tool_calls')
+            if tool_calls:
+                logger.info(f"🔧 AI请求调用 {len(tool_calls)} 个工具")
+                return {
+                    "tool_calls": tool_calls,
+                    "content": message.get('content', ''),
+                    "finish_reason": finish_reason
+                }
+            
+            # 没有工具调用，返回普通内容
+            content = message.get('content', '')
+            if content:
+                return {
+                    "content": content,
+                    "finish_reason": finish_reason
+                }
+            else:
+                raise ValueError(f"AI返回了空内容（finish_reason: {finish_reason}）")
+            
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ OpenAI API调用失败 (HTTP {e.response.status_code})")
+            logger.error(f"  - 错误信息: {e.response.text}")
+            raise Exception(f"API返回错误 ({e.response.status_code}): {e.response.text}")
+        except Exception as e:
+            logger.error(f"❌ OpenAI API调用失败: {str(e)}")
+            raise
+
+    async def _generate_anthropic_with_tools(
+        self,
+        prompt: str,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        system_prompt: Optional[str],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """使用Anthropic生成文本（支持工具调用）"""
+        if not self.anthropic_client:
+            raise ValueError("Anthropic客户端未初始化，请检查API key配置")
+        
+        try:
+            logger.info(f"🔵 开始调用Anthropic API（支持工具调用）")
+            logger.info(f"  - 模型: {model}")
+            logger.info(f"  - 工具数量: {len(tools) if tools else 0}")
+            
+            kwargs = {
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            
+            if system_prompt:
+                kwargs["system"] = system_prompt
+            
+            # 添加工具参数
+            if tools:
+                kwargs["tools"] = tools
+                if tool_choice == "required":
+                    kwargs["tool_choice"] = {"type": "any"}
+                elif tool_choice == "auto":
+                    kwargs["tool_choice"] = {"type": "auto"}
+            
+            response = await self.anthropic_client.messages.create(**kwargs)
+            
+            # 检查是否有工具调用
+            tool_calls = []
+            content_text = ""
+            
+            for block in response.content:
+                if block.type == "tool_use":
+                    tool_calls.append({
+                        "id": block.id,
+                        "type": "function",
+                        "function": {
+                            "name": block.name,
+                            "arguments": block.input
+                        }
+                    })
+                elif block.type == "text":
+                    content_text += block.text
+            
+            if tool_calls:
+                logger.info(f"🔧 AI请求调用 {len(tool_calls)} 个工具")
+                return {
+                    "tool_calls": tool_calls,
+                    "content": content_text,
+                    "finish_reason": response.stop_reason
+                }
+            
+            return {
+                "content": content_text,
+                "finish_reason": response.stop_reason
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Anthropic API调用失败: {str(e)}")
+            raise
+
     async def _generate_openai_stream(
         self,
         prompt: str,
@@ -456,6 +632,232 @@ class AIService:
             logger.error(f"❌ Anthropic流式API调用失败: {str(e)}")
             logger.error(f"  - 错误类型: {type(e).__name__}")
             raise
+    
+    async def generate_text_with_mcp(
+        self,
+        prompt: str,
+        user_id: str,
+        db_session,
+        enable_mcp: bool = True,
+        max_tool_rounds: int = 3,
+        tool_choice: str = "auto",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        支持MCP工具的AI文本生成（非流式）
+        
+        Args:
+            prompt: 用户提示词
+            user_id: 用户ID，用于获取MCP工具
+            db_session: 数据库会话
+            enable_mcp: 是否启用MCP增强
+            max_tool_rounds: 最大工具调用轮次
+            tool_choice: 工具选择策略（auto/required/none）
+            **kwargs: 其他AI参数（provider, model, temperature等）
+        
+        Returns:
+            {
+                "content": "AI生成的最终文本",
+                "tool_calls_made": 2,  # 实际调用的工具次数
+                "tools_used": ["exa_search", "filesystem_read"],
+                "finish_reason": "stop",
+                "mcp_enhanced": True
+            }
+        """
+        from app.services.mcp_tool_service import mcp_tool_service, MCPToolServiceError
+        
+        # 初始化返回结果
+        result = {
+            "content": "",
+            "tool_calls_made": 0,
+            "tools_used": [],
+            "finish_reason": "",
+            "mcp_enhanced": False
+        }
+        
+        # 1. 获取MCP工具（如果启用）
+        tools = None
+        if enable_mcp:
+            try:
+                tools = await mcp_tool_service.get_user_enabled_tools(
+                    user_id=user_id,
+                    db_session=db_session
+                )
+                if tools:
+                    logger.info(f"MCP增强: 加载了 {len(tools)} 个工具")
+                    result["mcp_enhanced"] = True
+            except MCPToolServiceError as e:
+                logger.error(f"获取MCP工具失败，降级为普通生成: {e}")
+                tools = None
+        
+        # 2. 工具调用循环
+        conversation_history = [
+            {"role": "user", "content": prompt}
+        ]
+        
+        for round_num in range(max_tool_rounds):
+            logger.info(f"MCP工具调用轮次: {round_num + 1}/{max_tool_rounds}")
+            
+            # 调用AI
+            ai_response = await self.generate_text(
+                prompt=conversation_history[-1]["content"],
+                tools=tools if round_num == 0 else None,  # 只在第一轮传递工具
+                tool_choice=tool_choice if round_num == 0 else None,
+                **kwargs
+            )
+            
+            # 检查是否有工具调用
+            tool_calls = ai_response.get("tool_calls", [])
+            
+            if not tool_calls:
+                # AI返回最终内容
+                result["content"] = ai_response.get("content", "")
+                result["finish_reason"] = ai_response.get("finish_reason", "stop")
+                break
+            
+            # 3. 执行工具调用
+            logger.info(f"AI请求调用 {len(tool_calls)} 个工具")
+            
+            try:
+                tool_results = await mcp_tool_service.execute_tool_calls(
+                    user_id=user_id,
+                    tool_calls=tool_calls,
+                    db_session=db_session
+                )
+                
+                # 记录使用的工具
+                for tool_call in tool_calls:
+                    tool_name = tool_call["function"]["name"]
+                    if tool_name not in result["tools_used"]:
+                        result["tools_used"].append(tool_name)
+                
+                result["tool_calls_made"] += len(tool_calls)
+                
+                # 4. 构建工具上下文
+                tool_context = await mcp_tool_service.build_tool_context(
+                    tool_results,
+                    format="markdown"
+                )
+                
+                # 5. 更新对话历史
+                conversation_history.append({
+                    "role": "assistant",
+                    "content": ai_response.get("content", ""),
+                    "tool_calls": tool_calls
+                })
+                
+                for tool_result in tool_results:
+                    conversation_history.append({
+                        "role": "tool",
+                        "tool_call_id": tool_result["tool_call_id"],
+                        "content": tool_result["content"]
+                    })
+                
+                # 6. 构建下一轮提示
+                next_prompt = (
+                    f"{prompt}\n\n"
+                    f"{tool_context}\n\n"
+                    f"请基于以上工具查询结果，继续完成任务。"
+                )
+                conversation_history.append({
+                    "role": "user",
+                    "content": next_prompt
+                })
+                
+            except Exception as e:
+                logger.error(f"执行MCP工具失败: {e}", exc_info=True)
+                # 降级：返回当前AI响应
+                result["content"] = ai_response.get("content", "")
+                result["finish_reason"] = "tool_error"
+                break
+        
+        else:
+            # 达到最大轮次
+            logger.warning(f"达到MCP最大调用轮次 {max_tool_rounds}")
+            result["content"] = conversation_history[-1].get("content", "")
+            result["finish_reason"] = "max_rounds"
+        
+        return result
+    
+    async def generate_text_stream_with_mcp(
+        self,
+        prompt: str,
+        user_id: str,
+        db_session,
+        enable_mcp: bool = True,
+        mcp_planning_prompt: Optional[str] = None,
+        **kwargs
+    ) -> AsyncGenerator[str, None]:
+        """
+        支持MCP工具的AI流式文本生成（两阶段模式）
+        
+        Args:
+            prompt: 用户提示词
+            user_id: 用户ID
+            db_session: 数据库会话
+            enable_mcp: 是否启用MCP增强
+            mcp_planning_prompt: MCP规划阶段的提示词（可选）
+            **kwargs: 其他AI参数
+        
+        Yields:
+            流式文本chunk
+        """
+        from app.services.mcp_tool_service import mcp_tool_service
+        
+        # 阶段1: 工具调用阶段（非流式）
+        enhanced_prompt = prompt
+        
+        if enable_mcp:
+            try:
+                # 获取MCP工具
+                tools = await mcp_tool_service.get_user_enabled_tools(
+                    user_id=user_id,
+                    db_session=db_session
+                )
+                
+                if tools:
+                    logger.info(f"MCP增强（流式）: 加载了 {len(tools)} 个工具")
+                    
+                    # 使用规划提示让AI决定需要查询什么
+                    if not mcp_planning_prompt:
+                        mcp_planning_prompt = (
+                            f"任务: {prompt}\n\n"
+                            f"请分析这个任务，决定是否需要查询外部信息。"
+                            f"如果需要，请调用相应的工具获取信息。"
+                        )
+                    
+                    # 非流式调用获取工具结果
+                    planning_result = await self.generate_text_with_mcp(
+                        prompt=mcp_planning_prompt,
+                        user_id=user_id,
+                        db_session=db_session,
+                        enable_mcp=True,
+                        max_tool_rounds=2,
+                        tool_choice="auto",
+                        **kwargs
+                    )
+                    
+                    # 如果有工具调用，将结果融入提示
+                    if planning_result["tool_calls_made"] > 0:
+                        enhanced_prompt = (
+                            f"{prompt}\n\n"
+                            f"【参考资料】\n"
+                            f"{planning_result.get('content', '')}"
+                        )
+                        logger.info(
+                            f"MCP工具规划完成，调用了 "
+                            f"{planning_result['tool_calls_made']} 次工具"
+                        )
+            
+            except Exception as e:
+                logger.error(f"MCP工具规划失败，使用原始提示: {e}")
+        
+        # 阶段2: 内容生成阶段（流式）
+        async for chunk in self.generate_text_stream(
+            prompt=enhanced_prompt,
+            **kwargs
+        ):
+            yield chunk
 
 
 # 创建全局AI服务实例

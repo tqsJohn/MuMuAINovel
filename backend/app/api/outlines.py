@@ -404,8 +404,8 @@ async def _generate_new_outline(
     db: AsyncSession,
     user_ai_service: AIService
 ) -> OutlineListResponse:
-    """全新生成大纲"""
-    logger.info(f"全新生成大纲 - 项目: {project.id}, keep_existing: {request.keep_existing}")
+    """全新生成大纲（MCP增强版）"""
+    logger.info(f"全新生成大纲 - 项目: {project.id}, enable_mcp: {request.enable_mcp}")
     
     # 获取角色信息
     characters_result = await db.execute(
@@ -418,7 +418,59 @@ async def _generate_new_outline(
         for char in characters
     ])
     
-    # 使用完整提示词
+    # 🔍 MCP工具增强：收集情节设计参考资料
+    mcp_reference_materials = ""
+    if request.enable_mcp:
+        try:
+            logger.info(f"🔍 尝试使用MCP工具收集大纲设计参考资料...")
+            
+            # 构建资料收集查询
+            planning_query = f"""你正在为小说《{project.title}》设计完整大纲。
+项目信息：
+- 主题：{request.theme or project.theme}
+- 类型：{request.genre or project.genre}
+- 章节数：{request.chapter_count}
+- 叙事视角：{request.narrative_perspective}
+- 目标字数：{request.target_words}
+
+世界观设定：
+- 时间背景：{project.world_time_period or '未设定'}
+- 地理位置：{project.world_location or '未设定'}
+- 氛围基调：{project.world_atmosphere or '未设定'}
+
+角色信息：
+{characters_info or '暂无角色'}
+
+请搜索：
+1. 该类型小说的经典情节结构和套路
+2. 适合该主题的冲突设计思路
+3. 符合世界观的情节元素和场景设计灵感
+
+请有针对性地查询1-2个最关键的问题。"""
+            
+            # 调用MCP增强的AI（非流式，最多2轮工具调用）
+            planning_result = await user_ai_service.generate_text_with_mcp(
+                prompt=planning_query,
+                user_id="system",  # 全新生成时可能没有用户上下文
+                db_session=db,
+                enable_mcp=True,
+                max_tool_rounds=2,
+                tool_choice="auto",
+                provider=None,
+                model=None
+            )
+            
+            # 提取参考资料
+            if planning_result.get("tool_calls_made", 0) > 0:
+                mcp_reference_materials = planning_result.get("content", "")
+                logger.info(f"📚 MCP工具收集参考资料：{len(mcp_reference_materials)} 字符")
+            else:
+                logger.info(f"ℹ️ MCP工具未进行调用，继续正常生成")
+        except Exception as e:
+            logger.warning(f"⚠️ MCP工具调用失败，继续使用常规模式: {str(e)}")
+            mcp_reference_materials = ""
+    
+    # 使用完整提示词（插入MCP参考资料）
     prompt = prompt_service.get_complete_outline_prompt(
         title=project.title,
         theme=request.theme or project.theme or "未设定",
@@ -431,18 +483,22 @@ async def _generate_new_outline(
         atmosphere=project.world_atmosphere or "未设定",
         rules=project.world_rules or "未设定",
         characters_info=characters_info or "暂无角色信息",
-        requirements=request.requirements or ""
+        requirements=request.requirements or "",
+        mcp_references=mcp_reference_materials
     )
     
-    # 调用AI
+    # 调用AI生成大纲
     ai_response = await user_ai_service.generate_text(
         prompt=prompt,
         provider=request.provider,
         model=request.model
     )
     
+    # 提取内容（generate_text返回字典）
+    ai_content = ai_response.get("content", "") if isinstance(ai_response, dict) else ai_response
+    
     # 解析响应
-    outline_data = _parse_ai_response(ai_response)
+    outline_data = _parse_ai_response(ai_content)
     
     # 全新生成模式：必须删除旧大纲和章节
     # 注意：这是"new"模式的核心逻辑，应该始终删除旧数据
@@ -463,7 +519,7 @@ async def _generate_new_outline(
     history = GenerationHistory(
         project_id=project.id,
         prompt=prompt,
-        generated_content=ai_response,
+        generated_content=json.dumps(ai_response, ensure_ascii=False) if isinstance(ai_response, dict) else ai_response,
         model=request.model or "default"
     )
     db.add(history)
@@ -477,6 +533,92 @@ async def _generate_new_outline(
     return OutlineListResponse(total=len(outlines), items=outlines)
 
 
+async def _build_smart_outline_context(
+    latest_outlines: List[Outline],
+    user_id: str,
+    project_id: str
+) -> dict:
+    """
+    智能构建大纲续写上下文（支持海量大纲场景）
+    
+    策略：
+    1. 故事骨架：每50章采样1章（仅标题）
+    2. 近期概要：最近20章（标题+简要）
+    3. 最近详细：最近2章（完整内容）
+    
+    Args:
+        latest_outlines: 所有已有大纲列表
+        user_id: 用户ID
+        project_id: 项目ID
+        
+    Returns:
+        包含压缩后上下文的字典
+    """
+    total_count = len(latest_outlines)
+    
+    context = {
+        'story_skeleton': '',      # 故事骨架（标题列表）
+        'recent_summary': '',      # 近期概要（标题+内容前50字）
+        'recent_detail': '',       # 最近详细（完整内容）
+        'stats': {
+            'total': total_count,
+            'skeleton_samples': 0,
+            'recent_summaries': 0,
+            'recent_details': 0
+        }
+    }
+    
+    try:
+        # 1. 故事骨架（每50章采样，仅标题）
+        if total_count > 50:
+            sample_interval = 50
+            skeleton_indices = list(range(0, total_count, sample_interval))
+            skeleton_titles = [
+                f"第{latest_outlines[idx].order_index}章: {latest_outlines[idx].title}"
+                for idx in skeleton_indices
+            ]
+            context['story_skeleton'] = "【故事骨架】\n" + "\n".join(skeleton_titles)
+            context['stats']['skeleton_samples'] = len(skeleton_titles)
+            logger.info(f"  ✅ 故事骨架：采样{len(skeleton_titles)}章标题")
+        
+        # 2. 近期概要（最近20章，标题+内容前50字）
+        recent_summary_count = min(20, total_count)
+        if recent_summary_count > 2:  # 排除最后2章（它们会完整展示）
+            recent_for_summary = latest_outlines[-recent_summary_count:-2]
+            recent_summaries = [
+                f"第{o.order_index}章《{o.title}》: {o.content[:50]}..."
+                for o in recent_for_summary
+            ]
+            context['recent_summary'] = "【近期大纲概要】\n" + "\n".join(recent_summaries)
+            context['stats']['recent_summaries'] = len(recent_summaries)
+            logger.info(f"  ✅ 近期概要：{len(recent_summaries)}章")
+        
+        # 3. 最近详细（最近2章，完整内容）
+        recent_detail_count = min(2, total_count)
+        recent_details = latest_outlines[-recent_detail_count:]
+        detail_texts = [
+            f"第{o.order_index}章《{o.title}》: {o.content}"
+            for o in recent_details
+        ]
+        context['recent_detail'] = "【最近大纲详情】\n" + "\n".join(detail_texts)
+        context['stats']['recent_details'] = len(detail_texts)
+        logger.info(f"  ✅ 最近详细：{len(detail_texts)}章")
+        
+        # 计算总长度
+        total_length = sum([
+            len(context['story_skeleton']),
+            len(context['recent_summary']),
+            len(context['recent_detail'])
+        ])
+        context['stats']['total_length'] = total_length
+        logger.info(f"📊 大纲上下文总长度: {total_length} 字符")
+        
+    except Exception as e:
+        logger.error(f"❌ 构建智能大纲上下文失败: {str(e)}", exc_info=True)
+    
+    return context
+
+
 async def _continue_outline(
     request: OutlineGenerateRequest,
     project: Project,
@@ -485,8 +627,8 @@ async def _continue_outline(
     user_ai_service: AIService,
     user_id: str = "system"
 ) -> OutlineListResponse:
-    """续写大纲 - 分批生成，每批5章（记忆增强版）"""
-    logger.info(f"续写大纲 - 项目: {project.id}, 已有: {len(existing_outlines)} 章")
+    """续写大纲 - 分批生成，每批5章（记忆+MCP增强版）"""
+    logger.info(f"续写大纲 - 项目: {project.id}, 已有: {len(existing_outlines)} 章, enable_mcp: {request.enable_mcp}")
     
     # 分析已有大纲
     current_chapter_count = len(existing_outlines)
@@ -537,25 +679,35 @@ async def _continue_outline(
         )
         latest_outlines = latest_result.scalars().all()
         
-        # 获取最近2章的剧情
-        recent_outlines = latest_outlines[-2:] if len(latest_outlines) >= 2 else latest_outlines
-        recent_plot = "\n".join([
-            f"第{o.order_index}章《{o.title}》: {o.content}"
-            for o in recent_outlines
-        ])
+        # 🚀 使用智能上下文构建（支持海量大纲）
+        smart_context = await _build_smart_outline_context(
+            latest_outlines=latest_outlines,
+            user_id=user_id,
+            project_id=project.id
+        )
         
-        # 全部章节概览
-        all_chapters_brief = "\n".join([
-            f"第{o.order_index}章: {o.title}"
-            for o in latest_outlines
-        ])
+        # 组装上下文字符串
+        all_chapters_brief = ""
+        if smart_context['story_skeleton']:
+            all_chapters_brief += smart_context['story_skeleton'] + "\n\n"
+        if smart_context['recent_summary']:
+            all_chapters_brief += smart_context['recent_summary'] + "\n\n"
+        
+        # 最近详细内容作为 recent_plot
+        recent_plot = smart_context['recent_detail']
+        
+        # 日志统计
+        stats = smart_context['stats']
+        logger.info(f"📊 大纲上下文统计: 总数{stats['total']}, 骨架{stats['skeleton_samples']}, "
+                   f"概要{stats['recent_summaries']}, 详细{stats['recent_details']}, "
+                   f"长度{stats['total_length']}字符")
         
         # 🧠 构建记忆增强上下文（仅续写模式需要）
         memory_context = None
         try:
             logger.info(f"🧠 为第{batch_num + 1}批构建记忆上下文...")
             # 使用最近一章的大纲作为查询
-            query_outline = recent_outlines[-1].content if recent_outlines else ""
+            query_outline = latest_outlines[-1].content if latest_outlines else ""
             memory_context = await memory_service.build_context_for_generation(
                 user_id=user_id,
                 project_id=project.id,
@@ -568,7 +720,57 @@ async def _continue_outline(
             logger.warning(f"⚠️ 记忆上下文构建失败，继续不使用记忆: {str(e)}")
             memory_context = None
         
-        # 使用标准续写提示词模板（支持记忆增强）
+        # 🔍 MCP工具增强：收集续写参考资料
+        mcp_reference_materials = ""
+        if request.enable_mcp:
+            try:
+                logger.info(f"🔍 第{batch_num + 1}批：尝试使用MCP工具收集续写参考资料...")
+                
+                # 构建资料收集查询
+                latest_summary = latest_outlines[-1].content if latest_outlines else ""
+                planning_query = f"""你正在为小说《{project.title}》续写大纲。
+当前进度：已有{len(latest_outlines)}章，即将续写第{current_start_chapter}-{current_start_chapter + current_batch_size - 1}章
+
+项目信息：
+- 主题：{request.theme or project.theme}
+- 类型：{request.genre or project.genre}
+- 叙事视角：{request.narrative_perspective}
+- 情节阶段：{request.plot_stage}
+- 故事发展方向：{request.story_direction or '自然延续'}
+
+最近章节概要：
+{latest_summary[:200]}
+
+请搜索：
+1. 该情节阶段的经典处理手法和技巧
+2. 适合该发展方向的情节转折和冲突设计
+3. 符合类型特点的场景设计和剧情元素
+
+请有针对性地查询1-2个最关键的问题。"""
+                
+                # 调用MCP增强的AI（非流式，最多2轮工具调用）
+                planning_result = await user_ai_service.generate_text_with_mcp(
+                    prompt=planning_query,
+                    user_id=user_id,
+                    db_session=db,
+                    enable_mcp=True,
+                    max_tool_rounds=2,
+                    tool_choice="auto",
+                    provider=None,
+                    model=None
+                )
+                
+                # 提取参考资料
+                if planning_result.get("tool_calls_made", 0) > 0:
+                    mcp_reference_materials = planning_result.get("content", "")
+                    logger.info(f"📚 第{batch_num + 1}批MCP工具收集参考资料：{len(mcp_reference_materials)} 字符")
+                else:
+                    logger.info(f"ℹ️ 第{batch_num + 1}批MCP工具未进行调用，继续正常生成")
+            except Exception as e:
+                logger.warning(f"⚠️ 第{batch_num + 1}批MCP工具调用失败，继续使用常规模式: {str(e)}")
+                mcp_reference_materials = ""
+        
+        # 使用标准续写提示词模板（支持记忆+MCP增强）
         prompt = prompt_service.get_outline_continue_prompt(
             title=project.title,
             theme=request.theme or project.theme or "未设定",
@@ -587,7 +789,8 @@ async def _continue_outline(
             start_chapter=current_start_chapter,
             story_direction=request.story_direction or "自然延续",
             requirements=request.requirements or "",
-            memory_context=memory_context
+            memory_context=memory_context,
+            mcp_references=mcp_reference_materials
         )
         
         # 调用AI生成当前批次
@@ -598,8 +801,11 @@ async def _continue_outline(
             model=request.model
         )
         
+        # 提取内容（generate_text返回字典）
+        ai_content = ai_response.get("content", "") if isinstance(ai_response, dict) else ai_response
+        
         # 解析响应
-        outline_data = _parse_ai_response(ai_response)
+        outline_data = _parse_ai_response(ai_content)
         
         # 保存当前批次的大纲
         batch_outlines = await _save_outlines(
@@ -610,7 +816,7 @@ async def _continue_outline(
         history = GenerationHistory(
             project_id=project.id,
             prompt=f"[批次{batch_num + 1}/{total_batches}] {str(prompt)[:500]}",
-            generated_content=ai_response,
+            generated_content=json.dumps(ai_response, ensure_ascii=False) if isinstance(ai_response, dict) else ai_response,
             model=request.model or "default"
         )
         db.add(history)
@@ -724,7 +930,7 @@ async def new_outline_generator(
     db: AsyncSession,
     user_ai_service: AIService
 ) -> AsyncGenerator[str, None]:
-    """全新生成大纲SSE生成器"""
+    """全新生成大纲SSE生成器（MCP增强版）"""
     db_committed = False
     try:
         yield await SSEResponse.send_progress("开始生成大纲...", 5)
@@ -732,6 +938,7 @@ async def new_outline_generator(
         project_id = data.get("project_id")
         # 确保chapter_count是整数（前端可能传字符串）
         chapter_count = int(data.get("chapter_count", 10))
+        enable_mcp = data.get("enable_mcp", True)
         
         # 验证项目
         yield await SSEResponse.send_progress("加载项目信息...", 10)
@@ -756,7 +963,61 @@ async def new_outline_generator(
             for char in characters
         ])
         
-        # 使用完整提示词
+        # 🔍 MCP工具增强：收集情节设计参考资料
+        mcp_reference_materials = ""
+        if enable_mcp:
+            try:
+                yield await SSEResponse.send_progress("🔍 使用MCP工具收集参考资料...", 18)
+                logger.info(f"🔍 尝试使用MCP工具收集大纲设计参考资料...")
+                
+                # 构建资料收集查询
+                planning_query = f"""你正在为小说《{project.title}》设计完整大纲。
+项目信息：
+- 主题：{data.get('theme') or project.theme}
+- 类型：{data.get('genre') or project.genre}
+- 章节数：{chapter_count}
+- 叙事视角：{data.get('narrative_perspective') or '第三人称'}
+- 目标字数：{data.get('target_words') or project.target_words or 100000}
+
+世界观设定：
+- 时间背景：{project.world_time_period or '未设定'}
+- 地理位置：{project.world_location or '未设定'}
+- 氛围基调：{project.world_atmosphere or '未设定'}
+
+角色信息：
+{characters_info or '暂无角色'}
+
+请搜索：
+1. 该类型小说的经典情节结构和套路
+2. 适合该主题的冲突设计思路
+3. 符合世界观的情节元素和场景设计灵感
+
+请有针对性地查询1-2个最关键的问题。"""
+                
+                # 调用MCP增强的AI（非流式，最多2轮工具调用）
+                planning_result = await user_ai_service.generate_text_with_mcp(
+                    prompt=planning_query,
+                    user_id="system",
+                    db_session=db,
+                    enable_mcp=True,
+                    max_tool_rounds=2,
+                    tool_choice="auto",
+                    provider=None,
+                    model=None
+                )
+                
+                # 提取参考资料
+                if planning_result.get("tool_calls_made", 0) > 0:
+                    mcp_reference_materials = planning_result.get("content", "")
+                    logger.info(f"📚 MCP工具收集参考资料：{len(mcp_reference_materials)} 字符")
+                    yield await SSEResponse.send_progress(f"📚 MCP收集到参考资料 ({len(mcp_reference_materials)}字符)", 19)
+                else:
+                    logger.info(f"ℹ️ MCP工具未进行调用，继续正常生成")
+            except Exception as e:
+                logger.warning(f"⚠️ MCP工具调用失败，继续使用常规模式: {str(e)}")
+                mcp_reference_materials = ""
+        
+        # 使用完整提示词（插入MCP参考资料）
         yield await SSEResponse.send_progress("准备AI提示词...", 20)
         prompt = prompt_service.get_complete_outline_prompt(
             title=project.title,
@@ -770,7 +1031,8 @@ async def new_outline_generator(
             atmosphere=project.world_atmosphere or "未设定",
             rules=project.world_rules or "未设定",
             characters_info=characters_info or "暂无角色信息",
-            requirements=data.get("requirements") or ""
+            requirements=data.get("requirements") or "",
+            mcp_references=mcp_reference_materials
         )
         
         # 调用AI
@@ -783,8 +1045,11 @@ async def new_outline_generator(
         
         yield await SSEResponse.send_progress("✅ AI生成完成，正在解析...", 70)
         
+        # 提取内容（generate_text返回字典）
+        ai_content = ai_response.get("content", "") if isinstance(ai_response, dict) else ai_response
+        
         # 解析响应
-        outline_data = _parse_ai_response(ai_response)
+        outline_data = _parse_ai_response(ai_content)
         
         # 删除旧大纲和章节
         yield await SSEResponse.send_progress("清理旧数据...", 75)
@@ -806,7 +1071,7 @@ async def new_outline_generator(
         history = GenerationHistory(
             project_id=project_id,
             prompt=prompt,
-            generated_content=ai_response,
+            generated_content=json.dumps(ai_response, ensure_ascii=False) if isinstance(ai_response, dict) else ai_response,
             model=data.get("model") or "default"
         )
         db.add(history)
@@ -861,7 +1126,7 @@ async def continue_outline_generator(
     user_ai_service: AIService,
     user_id: str = "system"
 ) -> AsyncGenerator[str, None]:
-    """大纲续写SSE生成器 - 分批生成，推送进度（记忆增强版）"""
+    """大纲续写SSE生成器 - 分批生成，推送进度（记忆+MCP增强版）"""
     db_committed = False
     try:
         yield await SSEResponse.send_progress("开始续写大纲...", 5)
@@ -952,18 +1217,28 @@ async def continue_outline_generator(
             )
             latest_outlines = latest_result.scalars().all()
             
-            # 获取最近2章的剧情
-            recent_outlines = latest_outlines[-2:] if len(latest_outlines) >= 2 else latest_outlines
-            recent_plot = "\n".join([
-                f"第{o.order_index}章《{o.title}》: {o.content}"
-                for o in recent_outlines
-            ])
+            # 🚀 使用智能上下文构建（支持海量大纲）
+            smart_context = await _build_smart_outline_context(
+                latest_outlines=latest_outlines,
+                user_id=user_id,
+                project_id=project_id
+            )
             
-            # 全部章节概览
-            all_chapters_brief = "\n".join([
-                f"第{o.order_index}章: {o.title}"
-                for o in latest_outlines
-            ])
+            # 组装上下文字符串
+            all_chapters_brief = ""
+            if smart_context['story_skeleton']:
+                all_chapters_brief += smart_context['story_skeleton'] + "\n\n"
+            if smart_context['recent_summary']:
+                all_chapters_brief += smart_context['recent_summary'] + "\n\n"
+            
+            # 最近详细内容作为 recent_plot
+            recent_plot = smart_context['recent_detail']
+            
+            # 日志统计
+            stats = smart_context['stats']
+            logger.info(f"📊 批次{batch_num + 1}大纲上下文: 总数{stats['total']}, "
+                       f"骨架{stats['skeleton_samples']}, 概要{stats['recent_summaries']}, "
+                       f"详细{stats['recent_details']}, 长度{stats['total_length']}字符")
             
             # 🧠 构建记忆增强上下文
             memory_context = None
@@ -972,7 +1247,7 @@ async def continue_outline_generator(
                     f"🧠 构建记忆上下文...",
                     batch_progress + 3
                 )
-                query_outline = recent_outlines[-1].content if recent_outlines else ""
+                query_outline = latest_outlines[-1].content if latest_outlines else ""
                 memory_context = await memory_service.build_context_for_generation(
                     user_id=user_id,
                     project_id=project_id,
@@ -984,13 +1259,72 @@ async def continue_outline_generator(
             except Exception as e:
                 logger.warning(f"⚠️ 记忆上下文构建失败: {str(e)}")
                 memory_context = None
+            # 🔍 MCP工具增强：收集续写参考资料
+            mcp_reference_materials = ""
+            enable_mcp = data.get("enable_mcp", True)
+            if enable_mcp:
+                try:
+                    yield await SSEResponse.send_progress(
+                        f"🔍 第{str(batch_num + 1)}批：使用MCP工具收集参考资料...",
+                        batch_progress + 4
+                    )
+                    logger.info(f"🔍 第{batch_num + 1}批：尝试使用MCP工具收集续写参考资料...")
+                    
+                    # 构建资料收集查询
+                    latest_summary = latest_outlines[-1].content if latest_outlines else ""
+                    planning_query = f"""你正在为小说《{project.title}》续写大纲。
+当前进度：已有{len(latest_outlines)}章，即将续写第{current_start_chapter}-{current_start_chapter + current_batch_size - 1}章
+
+项目信息：
+- 主题：{data.get('theme') or project.theme}
+- 类型：{data.get('genre') or project.genre}
+- 叙事视角：{data.get('narrative_perspective') or project.narrative_perspective or '第三人称'}
+- 情节阶段：{data.get('plot_stage', 'development')}
+- 故事发展方向：{data.get('story_direction', '自然延续')}
+
+最近章节概要：
+{latest_summary[:200]}
+
+请搜索：
+1. 该情节阶段的经典处理手法和技巧
+2. 适合该发展方向的情节转折和冲突设计
+3. 符合类型特点的场景设计和剧情元素
+
+请有针对性地查询1-2个最关键的问题。"""
+                    
+                    # 调用MCP增强的AI（非流式，最多2轮工具调用）
+                    planning_result = await user_ai_service.generate_text_with_mcp(
+                        prompt=planning_query,
+                        user_id=user_id,
+                        db_session=db,
+                        enable_mcp=True,
+                        max_tool_rounds=2,
+                        tool_choice="auto",
+                        provider=None,
+                        model=None
+                    )
+                    
+                    # 提取参考资料
+                    if planning_result.get("tool_calls_made", 0) > 0:
+                        mcp_reference_materials = planning_result.get("content", "")
+                        logger.info(f"📚 第{batch_num + 1}批MCP工具收集参考资料：{len(mcp_reference_materials)} 字符")
+                        yield await SSEResponse.send_progress(
+                            f"📚 第{str(batch_num + 1)}批收集到参考资料 ({len(mcp_reference_materials)}字符)",
+                            batch_progress + 4.5
+                        )
+                    else:
+                        logger.info(f"ℹ️ 第{batch_num + 1}批MCP工具未进行调用，继续正常生成")
+                except Exception as e:
+                    logger.warning(f"⚠️ 第{batch_num + 1}批MCP工具调用失败，继续使用常规模式: {str(e)}")
+                    mcp_reference_materials = ""
+            
             
             yield await SSEResponse.send_progress(
                 f" 调用AI生成第{str(batch_num + 1)}批...",
                 batch_progress + 5
             )
             
-            # 使用标准续写提示词模板（支持记忆增强）
+            # 使用标准续写提示词模板（支持记忆+MCP增强）
             prompt = prompt_service.get_outline_continue_prompt(
                 title=project.title,
                 theme=data.get("theme") or project.theme or "未设定",
@@ -1009,7 +1343,8 @@ async def continue_outline_generator(
                 start_chapter=current_start_chapter,
                 story_direction=data.get("story_direction", "自然延续"),
                 requirements=data.get("requirements", ""),
-                memory_context=memory_context
+                memory_context=memory_context,
+                mcp_references=mcp_reference_materials
             )
             
             # 调用AI生成当前批次
@@ -1024,8 +1359,11 @@ async def continue_outline_generator(
                 batch_progress + 10
             )
             
+            # 提取内容（generate_text返回字典）
+            ai_content = ai_response.get("content", "") if isinstance(ai_response, dict) else ai_response
+            
             # 解析响应
-            outline_data = _parse_ai_response(ai_response)
+            outline_data = _parse_ai_response(ai_content)
             
             # 保存当前批次的大纲
             batch_outlines = await _save_outlines(
@@ -1036,7 +1374,7 @@ async def continue_outline_generator(
             history = GenerationHistory(
                 project_id=project_id,
                 prompt=f"[续写批次{batch_num + 1}/{total_batches}] {str(prompt)[:500]}",
-                generated_content=ai_response,
+                generated_content=json.dumps(ai_response, ensure_ascii=False) if isinstance(ai_response, dict) else ai_response,
                 model=data.get("model") or "default"
             )
             db.add(history)

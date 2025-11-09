@@ -1,5 +1,5 @@
 """角色管理API"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 import json
@@ -221,6 +221,7 @@ async def delete_character(
 @router.post("/generate", response_model=CharacterResponse, summary="AI生成角色")
 async def generate_character(
     request: CharacterGenerateRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
     user_ai_service: AIService = Depends(get_user_ai_service)
 ):
@@ -294,18 +295,42 @@ async def generate_character(
             user_input=user_input
         )
         
-        # 调用AI生成角色
-        logger.info(f"🎯 开始为项目 {request.project_id} 生成角色")
+        # 获取user_id用于MCP工具调用
+        user_id = http_request.state.user_id if hasattr(http_request.state, 'user_id') else 'default_user'
+        
+        # 调用AI生成角色（支持MCP工具）
+        logger.info(f"🎯 开始为项目 {request.project_id} 生成角色（启用MCP）")
         logger.info(f"  - 角色名：{request.name or 'AI生成'}")
         logger.info(f"  - 角色定位：{request.role_type}")
         logger.info(f"  - 背景设定：{request.background or '无'}")
         logger.info(f"  - AI提供商：{user_ai_service.api_provider}")
         logger.info(f"  - AI模型：{user_ai_service.default_model}")
         logger.info(f"  - Prompt长度：{len(prompt)} 字符")
+        logger.info(f"  - 用户ID：{user_id}")
         
         try:
-            ai_response = await user_ai_service.generate_text(prompt=prompt)
-            logger.info(f"✅ AI响应接收完成，长度：{len(ai_response) if ai_response else 0} 字符")
+            # 使用支持MCP的生成方法
+            result = await user_ai_service.generate_text_with_mcp(
+                prompt=prompt,
+                user_id=user_id,
+                db_session=db,
+                enable_mcp=True,
+                max_tool_rounds=2,
+                tool_choice="auto",
+                provider=None,  # 使用AIService初始化时的配置
+                model=None      # 使用AIService初始化时的配置
+            )
+            
+            # 提取内容
+            if isinstance(result, dict):
+                ai_response = result.get('content', '')
+                logger.info(f"✅ AI响应接收完成（MCP增强），长度：{len(ai_response)} 字符")
+                if result.get('tool_calls'):
+                    logger.info(f"  - 工具调用：{len(result['tool_calls'])} 次")
+            else:
+                ai_response = result
+                logger.info(f"✅ AI响应接收完成，长度：{len(ai_response) if ai_response else 0} 字符")
+                
         except Exception as ai_error:
             logger.error(f"❌ AI服务调用异常：{str(ai_error)}")
             raise HTTPException(
@@ -559,7 +584,7 @@ async def generate_character(
         history = GenerationHistory(
             project_id=request.project_id,
             prompt=prompt,
-            generated_content=ai_response,
+            generated_content=json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else ai_response,
             model=user_ai_service.default_model
         )
         db.add(history)

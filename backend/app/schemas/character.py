@@ -63,6 +63,7 @@ class CharacterGenerateRequest(BaseModel):
     role_type: Optional[str] = Field(None, description="角色类型")
     background: Optional[str] = Field(None, description="角色背景")
     requirements: Optional[str] = Field(None, description="特殊要求")
+    enable_mcp: bool = Field(True, description="是否启用MCP工具增强（搜索人物原型参考）")
 
 
 class CharacterListResponse(BaseModel):

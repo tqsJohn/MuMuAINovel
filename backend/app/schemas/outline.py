@@ -61,6 +61,7 @@ class OutlineGenerateRequest(BaseModel):
     story_direction: Optional[str] = Field(None, description="故事发展方向提示(续写时使用)")
     plot_stage: str = Field("development", description="情节阶段: development(发展), climax(高潮), ending(结局)")
     keep_existing: bool = Field(False, description="是否保留现有大纲(续写时)")
+    enable_mcp: bool = Field(True, description="是否启用MCP工具增强（搜索情节设计参考）")
 
 
 class ChapterOutlineGenerateRequest(BaseModel):

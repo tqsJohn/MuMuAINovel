@@ -585,7 +585,7 @@ class ImportExportService:
         for char_data in characters_data:
             # 处理traits
             traits = char_data.get("traits")
-            if traits and isinstance(traits, list):
+            if isinstance(traits, list):
                 traits = json.dumps(traits, ensure_ascii=False)
             
             character = Character(

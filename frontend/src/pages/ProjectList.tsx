@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Button, Empty, Modal, message, Spin, Row, Col, Statistic, Space, Tag, Progress, Typography, Tooltip, Badge, Alert, Upload, Checkbox, Divider, Switch } from 'antd';
-import { EditOutlined, DeleteOutlined, BookOutlined, RocketOutlined, CalendarOutlined, FileTextOutlined, TrophyOutlined, FireOutlined, SettingOutlined, InfoCircleOutlined, CloseOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Card, Button, Empty, Modal, message, Spin, Row, Col, Statistic, Space, Tag, Progress, Typography, Tooltip, Badge, Alert, Upload, Checkbox, Divider, Switch, Dropdown } from 'antd';
+import { EditOutlined, DeleteOutlined, BookOutlined, RocketOutlined, CalendarOutlined, FileTextOutlined, TrophyOutlined, FireOutlined, SettingOutlined, InfoCircleOutlined, CloseOutlined, UploadOutlined, DownloadOutlined, ApiOutlined, MoreOutlined } from '@ant-design/icons';
 import { projectApi } from '../services/api';
 import { useStore } from '../store';
 import { useProjectSync } from '../store/hooks';
@@ -388,10 +388,25 @@ export default function ProjectList() {
                     >
                       导入
                     </Button>
+                    <Button
+                      type="default"
+                      size="middle"
+                      icon={<ApiOutlined />}
+                      onClick={() => navigate('/mcp-plugins')}
+                      style={{
+                        flex: 1,
+                        borderRadius: 8,
+                        borderColor: '#722ed1',
+                        color: '#722ed1',
+                        boxShadow: '0 2px 8px rgba(114, 46, 209, 0.2)'
+                      }}
+                    >
+                      MCP
+                    </Button>
                   </Space>
                 </Space>
               ) : (
-                // PC端：原有布局
+                // PC端：优化后的布局 - 主要按钮 + 下拉菜单
                 <Space size={12} style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <Button
                     type="primary"
@@ -406,51 +421,6 @@ export default function ProjectList() {
                     }}
                   >
                     向导创建
-                  </Button>
-                  <Button
-                    type="default"
-                    size="large"
-                    icon={<DownloadOutlined />}
-                    onClick={handleOpenExportModal}
-                    disabled={exportableProjects.length === 0}
-                    style={{
-                      borderRadius: 8,
-                      borderColor: '#1890ff',
-                      color: '#1890ff',
-                      boxShadow: '0 2px 8px rgba(24, 144, 255, 0.2)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = '#1890ff';
-                      e.currentTarget.style.background = '#e6f7ff';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = '#1890ff';
-                      e.currentTarget.style.background = 'transparent';
-                    }}
-                  >
-                    导出项目
-                  </Button>
-                  <Button
-                    type="default"
-                    size="large"
-                    icon={<UploadOutlined />}
-                    onClick={() => setImportModalVisible(true)}
-                    style={{
-                      borderRadius: 8,
-                      borderColor: '#52c41a',
-                      color: '#52c41a',
-                      boxShadow: '0 2px 8px rgba(82, 196, 26, 0.2)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = '#52c41a';
-                      e.currentTarget.style.background = '#f6ffed';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = '#52c41a';
-                      e.currentTarget.style.background = 'transparent';
-                    }}
-                  >
-                    导入项目
                   </Button>
                   <Button
                     type="default"
@@ -476,6 +446,58 @@ export default function ProjectList() {
                   >
                     API设置
                   </Button>
+                  <Dropdown
+                    menu={{
+                      items: [
+                        {
+                          key: 'export',
+                          label: '导出项目',
+                          icon: <DownloadOutlined />,
+                          onClick: handleOpenExportModal,
+                          disabled: exportableProjects.length === 0
+                        },
+                        {
+                          key: 'import',
+                          label: '导入项目',
+                          icon: <UploadOutlined />,
+                          onClick: () => setImportModalVisible(true)
+                        },
+                        {
+                          type: 'divider'
+                        },
+                        {
+                          key: 'mcp',
+                          label: 'MCP插件',
+                          icon: <ApiOutlined />,
+                          onClick: () => navigate('/mcp-plugins')
+                        }
+                      ]
+                    }}
+                    placement="bottomRight"
+                  >
+                    <Button
+                      size="large"
+                      icon={<MoreOutlined />}
+                      style={{
+                        borderRadius: 8,
+                        borderColor: '#d9d9d9',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                        transition: 'all 0.3s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = '#1890ff';
+                        e.currentTarget.style.color = '#1890ff';
+                        e.currentTarget.style.boxShadow = '0 2px 12px rgba(24, 144, 255, 0.3)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = '#d9d9d9';
+                        e.currentTarget.style.color = 'rgba(0, 0, 0, 0.88)';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
+                      }}
+                    >
+                      更多
+                    </Button>
+                  </Dropdown>
                   <UserMenu />
                 </Space>
               )}
