@@ -158,8 +158,18 @@ def create_sse_response(generator: AsyncGenerator[str, None]) -> StreamingRespon
     Returns:
         StreamingResponse对象
     """
+    async def wrapper():
+        """包装生成器以捕获StreamingResponse初始化时的GeneratorExit"""
+        try:
+            async for chunk in generator:
+                yield chunk
+        except GeneratorExit:
+            # StreamingResponse在初始化时会进行类型检查，导致GeneratorExit
+            # 这是正常行为，不需要记录警告
+            pass
+    
     return StreamingResponse(
-        generator,
+        wrapper(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Card, Table, Tag, Button, Space, message, Modal, Form, Select, Slider, Input, Tabs } from 'antd';
+import { Card, Table, Tag, Button, Space, message, Modal, Form, Select, Slider, Input, Tabs, AutoComplete } from 'antd';
 import { PlusOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import axios from 'axios';
@@ -133,6 +133,7 @@ export default function Relationships() {
     if (level >= 75) return 'green';
     if (level >= 50) return 'blue';
     if (level >= 25) return 'orange';
+    if (level >= 0) return 'volcano';
     return 'red';
   };
 
@@ -383,14 +384,15 @@ export default function Relationships() {
             label="关系类型"
             rules={[{ required: true, message: '请选择或输入关系类型' }]}
           >
-            <Select
-              placeholder="选择预定义类型或输入自定义"
-              showSearch
-              allowClear
+            <AutoComplete
+              placeholder="选择预定义类型或输入自定义关系"
               options={relationshipTypes.map(t => ({
                 label: `${t.icon || ''} ${t.name} (${categoryLabels[t.category]})`,
                 value: t.name
               }))}
+              filterOption={(inputValue, option) =>
+                option!.value.toUpperCase().indexOf(inputValue.toUpperCase()) !== -1
+              }
             />
           </Form.Item>
 
@@ -417,9 +419,15 @@ export default function Relationships() {
             initialValue={50}
           >
             <Slider
-              min={0}
+              min={-100}
               max={100}
-              marks={{ 0: '0', 25: '25', 50: '50', 75: '75', 100: '100' }}
+              marks={{
+                '-100': '-100',
+                '-50': '-50',
+                0: '0',
+                50: '50',
+                100: '100'
+              }}
             />
           </Form.Item>
 

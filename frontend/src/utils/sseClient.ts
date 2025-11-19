@@ -2,6 +2,7 @@ export interface SSEMessage {
   type: 'progress' | 'chunk' | 'result' | 'error' | 'done';
   message?: string;
   progress?: number;
+  word_count?: number;
   status?: 'processing' | 'success' | 'error' | 'warning';
   content?: string;
   data?: any;
@@ -10,7 +11,7 @@ export interface SSEMessage {
 }
 
 export interface SSEClientOptions {
-  onProgress?: (message: string, progress: number, status: string) => void;
+  onProgress?: (message: string, progress: number, status: string, wordCount?: number) => void;
   onChunk?: (content: string) => void;
   onResult?: (data: any) => void;
   onError?: (error: string, code?: number) => void;
@@ -61,8 +62,13 @@ export class SSEClient {
   private handleMessage(message: SSEMessage, resolve: Function, reject: Function) {
     switch (message.type) {
       case 'progress':
-        if (this.options.onProgress && message.message && message.progress !== undefined) {
-          this.options.onProgress(message.message, message.progress, message.status || 'processing');
+        if (this.options.onProgress && message.progress !== undefined) {
+          this.options.onProgress(
+            message.message || '',
+            message.progress,
+            message.status || 'processing',
+            message.word_count
+          );
         }
         break;
 
@@ -201,8 +207,13 @@ export class SSEPostClient {
   private async handleMessage(message: SSEMessage, resolve: Function, reject: Function) {
     switch (message.type) {
       case 'progress':
-        if (this.options.onProgress && message.message && message.progress !== undefined) {
-          this.options.onProgress(message.message, message.progress, message.status || 'processing');
+        if (this.options.onProgress && message.progress !== undefined) {
+          this.options.onProgress(
+            message.message || '',
+            message.progress,
+            message.status || 'processing',
+            message.word_count
+          );
         }
         break;
 

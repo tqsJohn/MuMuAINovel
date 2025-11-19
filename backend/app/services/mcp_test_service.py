@@ -164,6 +164,9 @@ class MCPTestService:
             # 转换为OpenAI Function Calling格式
             openai_tools = self._convert_tools_to_openai_format(tools)
             
+            logger.info(f"📋 转换后的OpenAI工具数量: {len(openai_tools)}")
+            logger.debug(f"📋 OpenAI工具列表: {[t['function']['name'] for t in openai_tools]}")
+            
             # 调用AI选择工具
             prompt = f"""你是MCP插件测试助手，需要测试插件 '{plugin.plugin_name}' 的功能。
 

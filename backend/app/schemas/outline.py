@@ -78,12 +78,70 @@ class OutlineListResponse(BaseModel):
     items: list[OutlineResponse]
 
 
-class OutlineReorderItem(BaseModel):
-    """单个大纲重排序项"""
-    id: str = Field(..., description="大纲ID")
-    order_index: int = Field(..., description="新的序号", ge=1)
+class ChapterPlanItem(BaseModel):
+    """单个章节规划项"""
+    sub_index: int = Field(..., description="子章节序号", ge=1)
+    title: str = Field(..., description="章节标题")
+    plot_summary: str = Field(..., description="剧情摘要(200-300字)")
+    key_events: list[str] = Field(..., description="关键事件列表")
+    character_focus: list[str] = Field(..., description="主要涉及的角色")
+    emotional_tone: str = Field(..., description="情感基调")
+    narrative_goal: str = Field(..., description="叙事目标")
+    conflict_type: str = Field(..., description="冲突类型")
+    estimated_words: int = Field(3000, description="预计字数", ge=1000)
+    scenes: Optional[list[str]] = Field(None, description="场景列表(可选)")
 
 
-class OutlineReorderRequest(BaseModel):
-    """大纲批量重排序请求"""
-    orders: list[OutlineReorderItem] = Field(..., description="排序列表")
+class OutlineExpansionRequest(BaseModel):
+    """大纲展开为多章节的请求模型（outline_id从路径参数获取）"""
+    target_chapter_count: int = Field(3, description="目标章节数", ge=1, le=10)
+    expansion_strategy: str = Field("balanced", description="展开策略: balanced(均衡), climax(高潮重点), detail(细节丰富)")
+    enable_scene_analysis: bool = Field(False, description="是否包含场景规划")
+    auto_create_chapters: bool = Field(True, description="是否自动创建章节记录")
+    provider: Optional[str] = Field(None, description="AI提供商")
+    model: Optional[str] = Field(None, description="AI模型")
+
+
+class OutlineExpansionResponse(BaseModel):
+    """大纲展开响应模型"""
+    outline_id: str = Field(..., description="大纲ID")
+    outline_title: str = Field(..., description="大纲标题")
+    target_chapter_count: int = Field(..., description="目标章节数")
+    actual_chapter_count: int = Field(..., description="实际生成的章节数")
+    expansion_strategy: str = Field(..., description="使用的展开策略")
+    chapter_plans: list[ChapterPlanItem] = Field(..., description="章节规划列表")
+    created_chapters: Optional[list] = Field(None, description="已创建的章节列表")
+
+
+class BatchOutlineExpansionRequest(BaseModel):
+    """批量大纲展开请求模型"""
+    project_id: str = Field(..., description="项目ID")
+    outline_ids: Optional[list[str]] = Field(None, description="要展开的大纲ID列表(为空则展开所有)")
+    chapters_per_outline: int = Field(3, description="每个大纲的目标章节数", ge=1, le=10)
+    expansion_strategy: str = Field("balanced", description="展开策略")
+    enable_scene_analysis: bool = Field(False, description="是否包含场景规划")
+    auto_create_chapters: bool = Field(True, description="是否自动创建章节记录")
+    provider: Optional[str] = Field(None, description="AI提供商")
+    model: Optional[str] = Field(None, description="AI模型")
+
+
+class BatchOutlineExpansionResponse(BaseModel):
+    """批量大纲展开响应模型"""
+    project_id: str = Field(..., description="项目ID")
+    total_outlines_expanded: int = Field(..., description="总共展开的大纲数")
+    total_chapters_created: int = Field(..., description="总共创建的章节数")
+    expansion_results: list[OutlineExpansionResponse] = Field(..., description="展开结果列表")
+    skipped_outlines: Optional[list[dict]] = Field(None, description="跳过的大纲列表(已展开)")
+
+
+class CreateChaptersFromPlansRequest(BaseModel):
+    """根据已有规划创建章节的请求模型"""
+    chapter_plans: list[ChapterPlanItem] = Field(..., description="章节规划列表（来自之前的AI生成结果）")
+
+
+class CreateChaptersFromPlansResponse(BaseModel):
+    """根据已有规划创建章节的响应模型"""
+    outline_id: str = Field(..., description="大纲ID")
+    outline_title: str = Field(..., description="大纲标题")
+    chapters_created: int = Field(..., description="创建的章节数")
+    created_chapters: list = Field(..., description="创建的章节列表")

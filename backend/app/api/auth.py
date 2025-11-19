@@ -9,6 +9,7 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 from app.services.oauth_service import LinuxDOOAuthService
 from app.user_manager import user_manager
+from app.user_password import password_manager
 from app.database import init_db
 from app.logger import get_logger
 from app.config import settings
@@ -49,6 +50,25 @@ class LocalLoginResponse(BaseModel):
     user: Optional[dict] = None
 
 
+class SetPasswordRequest(BaseModel):
+    """设置密码请求"""
+    password: str
+
+
+class SetPasswordResponse(BaseModel):
+    """设置密码响应"""
+    success: bool
+    message: str
+
+
+class PasswordStatusResponse(BaseModel):
+    """密码状态响应"""
+    has_password: bool
+    has_custom_password: bool
+    username: Optional[str] = None
+    default_password: Optional[str] = None
+
+
 @router.get("/config")
 async def get_auth_config():
     """获取认证配置信息"""
@@ -60,30 +80,77 @@ async def get_auth_config():
 
 @router.post("/local/login", response_model=LocalLoginResponse)
 async def local_login(request: LocalLoginRequest, response: Response):
-    """本地账户登录"""
+    """本地账户登录（支持.env配置的管理员账号和Linux DO授权后绑定的账号）"""
     # 检查是否启用本地登录
     if not settings.LOCAL_AUTH_ENABLED:
         raise HTTPException(status_code=403, detail="本地账户登录未启用")
     
-    # 检查是否配置了本地账户
-    if not settings.LOCAL_AUTH_USERNAME or not settings.LOCAL_AUTH_PASSWORD:
-        raise HTTPException(status_code=500, detail="本地账户未配置")
+    logger.info(f"[本地登录] 尝试登录用户名: {request.username}")
     
-    # 验证用户名和密码
-    if request.username != settings.LOCAL_AUTH_USERNAME or request.password != settings.LOCAL_AUTH_PASSWORD:
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    # 首先尝试查找 Linux DO 授权后绑定的账号
+    all_users = await user_manager.get_all_users()
+    target_user = None
     
-    # 生成本地用户ID（使用用户名的hash）
-    user_id = f"local_{hashlib.md5(request.username.encode()).hexdigest()[:16]}"
+    for user in all_users:
+        # 同时检查 users 表的 username 和 user_passwords 表的 username
+        password_username = await password_manager.get_username(user.user_id)
+        if user.username == request.username or password_username == request.username:
+            target_user = user
+            logger.info(f"[本地登录] 找到 Linux DO 授权用户: {user.user_id}")
+            break
     
-    # 创建或更新本地用户
-    user = await user_manager.create_or_update_from_linuxdo(
-        linuxdo_id=user_id,
-        username=request.username,
-        display_name=settings.LOCAL_AUTH_DISPLAY_NAME,
-        avatar_url=None,
-        trust_level=9  # 本地用户给予高信任级别
-    )
+    # 如果找到了 Linux DO 授权的用户
+    if target_user:
+        # 检查是否有密码
+        if not await password_manager.has_password(target_user.user_id):
+            logger.warning(f"[本地登录] 用户 {target_user.user_id} 没有设置密码")
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        
+        # 验证密码
+        if not await password_manager.verify_password(target_user.user_id, request.password):
+            logger.warning(f"[本地登录] 用户 {target_user.user_id} 密码验证失败")
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        
+        logger.info(f"[本地登录] Linux DO 授权用户 {target_user.user_id} 登录成功")
+        user = target_user
+    else:
+        # 没有找到 Linux DO 用户，尝试 .env 配置的管理员账号
+        logger.info(f"[本地登录] 未找到 Linux DO 用户，检查 .env 管理员账号")
+        
+        # 检查是否配置了本地账户
+        if not settings.LOCAL_AUTH_USERNAME or not settings.LOCAL_AUTH_PASSWORD:
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        
+        # 生成本地用户ID（使用用户名的hash）
+        user_id = f"local_{hashlib.md5(request.username.encode()).hexdigest()[:16]}"
+        
+        # 检查用户是否存在
+        user = await user_manager.get_user(user_id)
+        
+        # 如果用户不存在，使用.env中的默认密码验证
+        if not user:
+            # 验证用户名和密码（使用.env配置）
+            if request.username != settings.LOCAL_AUTH_USERNAME or request.password != settings.LOCAL_AUTH_PASSWORD:
+                raise HTTPException(status_code=401, detail="用户名或密码错误")
+            
+            # 创建本地用户
+            user = await user_manager.create_or_update_from_linuxdo(
+                linuxdo_id=user_id,
+                username=request.username,
+                display_name=settings.LOCAL_AUTH_DISPLAY_NAME,
+                avatar_url=None,
+                trust_level=9  # 本地用户给予高信任级别
+            )
+            
+            # 为新用户设置默认密码到数据库
+            await password_manager.set_password(user.user_id, request.username, request.password)
+            logger.info(f"[本地登录] 管理员用户 {user.user_id} 初始密码已设置到数据库")
+        else:
+            # 用户已存在，使用数据库中的密码验证
+            if not await password_manager.verify_password(user.user_id, request.password):
+                raise HTTPException(status_code=401, detail="用户名或密码错误")
+            
+            logger.info(f"[本地登录] 管理员用户 {user.user_id} 登录成功")
     
     # 初始化用户数据库
     try:
@@ -188,6 +255,11 @@ async def _handle_callback(
         avatar_url=avatar_url,
         trust_level=trust_level
     )
+    
+    # 3.1. 自动绑定密码（如果还没有设置）
+    if not await password_manager.has_password(user.user_id):
+        default_password = await password_manager.set_password(user.user_id, username)
+        logger.info(f"用户 {user.user_id} ({username}) 自动绑定默认密码: {default_password}")
     
     # 3.5. 初始化用户数据库（如果是新用户）
     try:
@@ -338,3 +410,125 @@ async def get_current_user(request: Request):
         raise HTTPException(status_code=401, detail="未登录")
     
     return request.state.user.dict()
+
+
+@router.get("/password/status", response_model=PasswordStatusResponse)
+async def get_password_status(request: Request):
+    """获取当前用户的密码状态"""
+    if not hasattr(request.state, "user") or not request.state.user:
+        raise HTTPException(status_code=401, detail="未登录")
+    
+    user = request.state.user
+    has_password = await password_manager.has_password(user.user_id)
+    has_custom = await password_manager.has_custom_password(user.user_id)
+    username = await password_manager.get_username(user.user_id)
+    
+    # 如果使用默认密码，返回默认密码供用户查看
+    default_password = None
+    if has_password and not has_custom:
+        default_password = f"{user.username}@666"
+    
+    return PasswordStatusResponse(
+        has_password=has_password,
+        has_custom_password=has_custom,
+        username=username or user.username,
+        default_password=default_password
+    )
+
+
+@router.post("/password/set", response_model=SetPasswordResponse)
+async def set_user_password(request: Request, password_req: SetPasswordRequest):
+    """设置当前用户的密码"""
+    if not hasattr(request.state, "user") or not request.state.user:
+        raise HTTPException(status_code=401, detail="未登录")
+    
+    user = request.state.user
+    
+    # 验证密码强度（至少6个字符）
+    if len(password_req.password) < 6:
+        raise HTTPException(status_code=400, detail="密码长度至少为6个字符")
+    
+    # 设置密码
+    await password_manager.set_password(user.user_id, user.username, password_req.password)
+    logger.info(f"用户 {user.user_id} ({user.username}) 设置了自定义密码")
+    
+    return SetPasswordResponse(
+        success=True,
+        message="密码设置成功"
+    )
+
+
+@router.post("/bind/login", response_model=LocalLoginResponse)
+async def bind_account_login(request: LocalLoginRequest, response: Response):
+    """使用绑定的账号密码登录（LinuxDO授权后绑定的账号）"""
+    # 查找用户
+    all_users = await user_manager.get_all_users()
+    target_user = None
+    
+    logger.info(f"[绑定账号登录] 尝试登录用户名: {request.username}")
+    logger.info(f"[绑定账号登录] 当前共有 {len(all_users)} 个用户")
+    
+    for user in all_users:
+        # 同时检查 users 表的 username 和 user_passwords 表的 username
+        password_username = await password_manager.get_username(user.user_id)
+        logger.info(f"[绑定账号登录] 检查用户 {user.user_id}: users.username={user.username}, passwords.username={password_username}")
+        
+        if user.username == request.username or password_username == request.username:
+            target_user = user
+            logger.info(f"[绑定账号登录] 找到匹配用户: {user.user_id}")
+            break
+    
+    if not target_user:
+        logger.warning(f"[绑定账号登录] 用户名 {request.username} 未找到")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    
+    # 检查是否有密码记录
+    has_pwd = await password_manager.has_password(target_user.user_id)
+    if not has_pwd:
+        logger.warning(f"[绑定账号登录] 用户 {target_user.user_id} 没有设置密码")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    
+    # 验证密码
+    is_valid = await password_manager.verify_password(target_user.user_id, request.password)
+    logger.info(f"[绑定账号登录] 用户 {target_user.user_id} 密码验证结果: {is_valid}")
+    
+    if not is_valid:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    
+    # 初始化用户数据库
+    try:
+        await init_db(target_user.user_id)
+        logger.info(f"绑定账号用户 {target_user.user_id} 数据库初始化成功")
+    except Exception as e:
+        logger.error(f"绑定账号用户 {target_user.user_id} 数据库初始化失败: {e}")
+    
+    # 设置 Cookie（2小时有效）
+    max_age = settings.SESSION_EXPIRE_MINUTES * 60
+    response.set_cookie(
+        key="user_id",
+        value=target_user.user_id,
+        max_age=max_age,
+        httponly=True,
+        samesite="lax"
+    )
+    
+    # 设置过期时间戳 Cookie（用于前端判断）
+    china_now = get_china_now()
+    expire_time = china_now + timedelta(minutes=settings.SESSION_EXPIRE_MINUTES)
+    expire_at = int(expire_time.timestamp())
+    
+    logger.info(f"✅ [绑定账号登录] 用户 {target_user.user_id} ({request.username}) 登录成功，会话有效期 {settings.SESSION_EXPIRE_MINUTES} 分钟")
+    
+    response.set_cookie(
+        key="session_expire_at",
+        value=str(expire_at),
+        max_age=max_age,
+        httponly=False,  # 前端需要读取
+        samesite="lax"
+    )
+    
+    return LocalLoginResponse(
+        success=True,
+        message="登录成功",
+        user=target_user.dict()
+    )

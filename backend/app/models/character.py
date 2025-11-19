@@ -14,8 +14,8 @@ class Character(Base):
     
     # 基本信息
     name = Column(String(100), nullable=False, comment="角色/组织名称")
-    age = Column(String(20), comment="年龄")
-    gender = Column(String(20), comment="性别")
+    age = Column(String(50), comment="年龄")
+    gender = Column(String(50), comment="性别")
     is_organization = Column(Boolean, default=False, comment="是否为组织")
     
     # 角色类型：protagonist(主角)/supporting(配角)/antagonist(反派)

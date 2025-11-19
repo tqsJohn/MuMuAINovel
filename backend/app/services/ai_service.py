@@ -82,7 +82,9 @@ class AIService:
             self.openai_http_client = None
             self.openai_api_key = None
             self.openai_base_url = None
-            logger.warning("OpenAI API key未配置")
+            # 只有当用户明确选择OpenAI作为提供商时才警告
+            if self.api_provider == "openai":
+                logger.warning("⚠️ OpenAI API key未配置，但被设置为当前AI提供商")
         
         # 初始化Anthropic客户端
         anthropic_key = api_key if api_provider == "anthropic" else app_settings.anthropic_api_key
@@ -118,7 +120,9 @@ class AIService:
                 self.anthropic_client = None
         else:
             self.anthropic_client = None
-            logger.warning("Anthropic API key未配置")
+            # 只有当用户明确选择Anthropic作为提供商时才警告
+            if self.api_provider == "anthropic":
+                logger.warning("⚠️ Anthropic API key未配置，但被设置为当前AI提供商")
     
     async def generate_text(
         self,

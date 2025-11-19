@@ -77,6 +77,7 @@ class ImportExportService:
             "chapter_count": project.chapter_count,
             "narrative_perspective": project.narrative_perspective,
             "character_count": project.character_count,
+            "user_id": project.user_id,
             "created_at": project.created_at.isoformat() if project.created_at else None,
         }
         
@@ -423,7 +424,8 @@ class ImportExportService:
     @staticmethod
     async def import_project(
         data: Dict,
-        db: AsyncSession
+        db: AsyncSession,
+        user_id: str
     ) -> ImportResult:
         """
         导入项目数据（创建新项目）
@@ -431,6 +433,7 @@ class ImportExportService:
         Args:
             data: 导入的JSON数据
             db: 数据库会话
+            user_id: 目标用户ID（导入后的项目归属）
             
         Returns:
             ImportResult: 导入结果
@@ -456,6 +459,7 @@ class ImportExportService:
             # 创建项目
             project_data = data["project"]
             new_project = Project(
+                user_id=user_id,  # 设置为当前用户ID
                 title=project_data.get("title"),
                 description=project_data.get("description"),
                 theme=project_data.get("theme"),

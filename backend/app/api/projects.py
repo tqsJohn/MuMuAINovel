@@ -41,17 +41,31 @@ router = APIRouter(prefix="/projects", tags=["项目管理"])
 @router.post("", response_model=ProjectResponse, summary="创建项目")
 async def create_project(
     project: ProjectCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None
 ):
     try:
-        logger.info(f"创建新项目: {project.title}")
-        db_project = Project(**project.model_dump())
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试创建项目")
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        logger.info(f"创建新项目: {project.title}, user_id={user_id}")
+        
+        # 创建项目时自动设置user_id
+        project_data = project.model_dump()
+        project_data['user_id'] = user_id
+        db_project = Project(**project_data)
+        
         db.add(db_project)
         await db.commit()
         await db.refresh(db_project)
-        logger.info(f"项目创建成功: {db_project.id}")
+        logger.info(f"项目创建成功: project_id={db_project.id}, user_id={user_id}")
         
         return db_project
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"创建项目失败: {str(e)}", exc_info=True)
         raise
@@ -61,24 +75,38 @@ async def create_project(
 async def get_projects(
     skip: int = 0,
     limit: int = 100,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None
 ):
-    """获取所有项目列表"""
+    """获取当前用户的项目列表"""
     try:
-        logger.debug(f"获取项目列表: skip={skip}, limit={limit}")
-        count_result = await db.execute(select(func.count(Project.id)))
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试获取项目列表")
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        logger.debug(f"获取项目列表: user_id={user_id}, skip={skip}, limit={limit}")
+        
+        # 只查询当前用户的项目
+        count_result = await db.execute(
+            select(func.count(Project.id)).where(Project.user_id == user_id)
+        )
         total = count_result.scalar_one()
         
         result = await db.execute(
             select(Project)
+            .where(Project.user_id == user_id)
             .order_by(Project.updated_at.desc())
             .offset(skip)
             .limit(limit)
         )
         projects = result.scalars().all()
-        logger.info(f"获取项目列表成功: 共{total}个项目")
+        logger.info(f"获取项目列表成功: user_id={user_id}, 共{total}个项目")
         
         return ProjectListResponse(total=total, items=projects)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取项目列表失败: {str(e)}", exc_info=True)
         raise
@@ -87,17 +115,29 @@ async def get_projects(
 @router.get("/{project_id}", response_model=ProjectResponse, summary="获取项目详情")
 async def get_project(
     project_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None
 ):
     try:
-        logger.debug(f"获取项目详情: {project_id}")
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试获取项目详情")
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        logger.debug(f"获取项目详情: project_id={project_id}, user_id={user_id}")
+        
+        # 只查询当前用户的项目
         result = await db.execute(
-            select(Project).where(Project.id == project_id)
+            select(Project).where(
+                Project.id == project_id,
+                Project.user_id == user_id
+            )
         )
         project = result.scalar_one_or_none()
         
         if not project:
-            logger.warning(f"项目不存在: {project_id}")
+            logger.warning(f"项目不存在或无权访问: project_id={project_id}, user_id={user_id}")
             raise HTTPException(status_code=404, detail="项目不存在")
         
         logger.info(f"获取项目详情成功: {project.title}")
@@ -113,17 +153,29 @@ async def get_project(
 async def update_project(
     project_id: str,
     project_update: ProjectUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None
 ):
     try:
-        logger.info(f"更新项目: {project_id}")
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试更新项目")
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        logger.info(f"更新项目: project_id={project_id}, user_id={user_id}")
+        
+        # 只查询当前用户的项目
         result = await db.execute(
-            select(Project).where(Project.id == project_id)
+            select(Project).where(
+                Project.id == project_id,
+                Project.user_id == user_id
+            )
         )
         project = result.scalar_one_or_none()
         
         if not project:
-            logger.warning(f"项目不存在: {project_id}")
+            logger.warning(f"项目不存在或无权访问: project_id={project_id}, user_id={user_id}")
             raise HTTPException(status_code=404, detail="项目不存在")
         
         update_data = project_update.model_dump(exclude_unset=True)
@@ -149,22 +201,30 @@ async def delete_project(
     db: AsyncSession = Depends(get_db)
 ):
     try:
-        logger.info(f"删除项目: {project_id}")
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试删除项目")
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        logger.info(f"删除项目: project_id={project_id}, user_id={user_id}")
+        
+        # 只查询当前用户的项目
         result = await db.execute(
-            select(Project).where(Project.id == project_id)
+            select(Project).where(
+                Project.id == project_id,
+                Project.user_id == user_id
+            )
         )
         project = result.scalar_one_or_none()
         
         if not project:
-            logger.warning(f"项目不存在: {project_id}")
+            logger.warning(f"项目不存在或无权访问: project_id={project_id}, user_id={user_id}")
             raise HTTPException(status_code=404, detail="项目不存在")
         
         project_title = project.title
         
-        # 从认证中间件获取用户ID
-        user_id = getattr(request.state, 'user_id', None)
-        
-        # 删除向量数据库中的记忆
+        # 删除向量数据库中的记忆（user_id已在上面获取）
         if user_id:
             try:
                 await memory_service.delete_project_memories(user_id, project_id)
@@ -234,22 +294,33 @@ async def delete_project(
 @router.get("/{project_id}/export", summary="导出项目章节为TXT")
 async def export_project_chapters(
     project_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None
 ):
     """
     导出项目的所有章节内容为TXT文本文件
     按章节顺序组织，包含项目基本信息
     """
     try:
-        logger.info(f"开始导出项目: {project_id}")
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试导出项目")
+            raise HTTPException(status_code=401, detail="未登录")
         
+        logger.info(f"开始导出项目: project_id={project_id}, user_id={user_id}")
+        
+        # 只查询当前用户的项目
         result = await db.execute(
-            select(Project).where(Project.id == project_id)
+            select(Project).where(
+                Project.id == project_id,
+                Project.user_id == user_id
+            )
         )
         project = result.scalar_one_or_none()
         
         if not project:
-            logger.warning(f"项目不存在: {project_id}")
+            logger.warning(f"项目不存在或无权访问: project_id={project_id}, user_id={user_id}")
             raise HTTPException(status_code=404, detail="项目不存在")
         
         chapters_result = await db.execute(
@@ -283,7 +354,9 @@ async def export_project_chapters(
         txt_content.append("\n" + "=" * 80 + "\n\n")
         
         for chapter in chapters:
-            txt_content.append(f"第 {chapter.chapter_number} 章  {chapter.title}")
+            # 处理子章节序号显示
+            chapter_display = f"{chapter.chapter_number}-{chapter.sub_index}" if chapter.sub_index and chapter.sub_index > 1 else str(chapter.chapter_number)
+            txt_content.append(f"第 {chapter_display} 章  {chapter.title}")
             txt_content.append("-" * 80)
             txt_content.append("")  # 空行
             
@@ -295,7 +368,11 @@ async def export_project_chapters(
             txt_content.append("\n\n" + "=" * 80 + "\n\n")
         
         txt_content.append(f"--- 全文完 ---")
-        txt_content.append(f"\n导出时间: {func.now()}")
+        
+        # 获取当前时间
+        from datetime import datetime
+        export_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        txt_content.append(f"\n导出时间: {export_time}")
         
         final_content = "\n".join(txt_content)
         
@@ -326,6 +403,7 @@ async def export_project_chapters(
 @router.post("/{project_id}/check-consistency", summary="检查数据一致性")
 async def check_project_consistency(
     project_id: str,
+    request: Request,
     auto_fix: bool = True,
     db: AsyncSession = Depends(get_db)
 ):
@@ -343,15 +421,25 @@ async def check_project_consistency(
     - organization_members: 验证组织成员数据完整性
     """
     try:
-        logger.info(f"开始数据一致性检查: {project_id}, auto_fix={auto_fix}")
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试检查数据一致性")
+            raise HTTPException(status_code=401, detail="未登录")
         
+        logger.info(f"开始数据一致性检查: project_id={project_id}, user_id={user_id}, auto_fix={auto_fix}")
+        
+        # 只查询当前用户的项目
         result = await db.execute(
-            select(Project).where(Project.id == project_id)
+            select(Project).where(
+                Project.id == project_id,
+                Project.user_id == user_id
+            )
         )
         project = result.scalar_one_or_none()
         
         if not project:
-            logger.warning(f"项目不存在: {project_id}")
+            logger.warning(f"项目不存在或无权访问: project_id={project_id}, user_id={user_id}")
             raise HTTPException(status_code=404, detail="项目不存在")
         
         report = await run_full_data_consistency_check(project_id, db, auto_fix)
@@ -369,6 +457,7 @@ async def check_project_consistency(
 @router.post("/{project_id}/fix-organizations", summary="修复组织记录")
 async def fix_project_organizations(
     project_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -377,15 +466,25 @@ async def fix_project_organizations(
     为所有is_organization=True但没有Organization记录的Character创建记录
     """
     try:
-        logger.info(f"开始修复组织记录: {project_id}")
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试修复组织记录")
+            raise HTTPException(status_code=401, detail="未登录")
         
+        logger.info(f"开始修复组织记录: project_id={project_id}, user_id={user_id}")
+        
+        # 只查询当前用户的项目
         result = await db.execute(
-            select(Project).where(Project.id == project_id)
+            select(Project).where(
+                Project.id == project_id,
+                Project.user_id == user_id
+            )
         )
         project = result.scalar_one_or_none()
         
         if not project:
-            logger.warning(f"项目不存在: {project_id}")
+            logger.warning(f"项目不存在或无权访问: project_id={project_id}, user_id={user_id}")
             raise HTTPException(status_code=404, detail="项目不存在")
         
         fixed_count, total_count = await fix_missing_organization_records(project_id, db)
@@ -407,6 +506,7 @@ async def fix_project_organizations(
 @router.post("/{project_id}/fix-member-counts", summary="修复成员计数")
 async def fix_project_member_counts(
     project_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -415,15 +515,25 @@ async def fix_project_member_counts(
     从实际成员记录重新计算每个组织的member_count
     """
     try:
-        logger.info(f"开始修复成员计数: {project_id}")
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试修复成员计数")
+            raise HTTPException(status_code=401, detail="未登录")
         
+        logger.info(f"开始修复成员计数: project_id={project_id}, user_id={user_id}")
+        
+        # 只查询当前用户的项目
         result = await db.execute(
-            select(Project).where(Project.id == project_id)
+            select(Project).where(
+                Project.id == project_id,
+                Project.user_id == user_id
+            )
         )
         project = result.scalar_one_or_none()
         
         if not project:
-            logger.warning(f"项目不存在: {project_id}")
+            logger.warning(f"项目不存在或无权访问: project_id={project_id}, user_id={user_id}")
             raise HTTPException(status_code=404, detail="项目不存在")
         
         fixed_count, total_count = await fix_organization_member_counts(project_id, db)
@@ -445,6 +555,7 @@ async def fix_project_member_counts(
 @router.post("/{project_id}/export-data", summary="导出项目数据为JSON")
 async def export_project_data(
     project_id: str,
+    request: Request,
     options: ExportOptions,
     db: AsyncSession = Depends(get_db)
 ):
@@ -459,16 +570,25 @@ async def export_project_data(
         JSON文件下载
     """
     try:
-        logger.info(f"开始导出项目数据: {project_id}")
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试导出项目数据")
+            raise HTTPException(status_code=401, detail="未登录")
         
-        # 检查项目是否存在
+        logger.info(f"开始导出项目数据: project_id={project_id}, user_id={user_id}")
+        
+        # 只查询当前用户的项目
         result = await db.execute(
-            select(Project).where(Project.id == project_id)
+            select(Project).where(
+                Project.id == project_id,
+                Project.user_id == user_id
+            )
         )
         project = result.scalar_one_or_none()
         
         if not project:
-            logger.warning(f"项目不存在: {project_id}")
+            logger.warning(f"项目不存在或无权访问: project_id={project_id}, user_id={user_id}")
             raise HTTPException(status_code=404, detail="项目不存在")
         
         # 导出数据
@@ -557,6 +677,7 @@ async def validate_import_file(
 @router.post("/import", response_model=ImportResult, summary="导入项目")
 async def import_project(
     file: UploadFile = File(...),
+    request: Request = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -569,7 +690,13 @@ async def import_project(
         导入结果
     """
     try:
-        logger.info(f"开始导入项目: {file.filename}")
+        # 从认证中间件获取用户ID
+        user_id = getattr(request.state, 'user_id', None)
+        if not user_id:
+            logger.warning("未登录用户尝试导入项目")
+            raise HTTPException(status_code=401, detail="未登录")
+        
+        logger.info(f"开始导入项目: {file.filename}, user_id={user_id}")
         
         # 检查文件类型
         if not file.filename.endswith('.json'):
@@ -589,8 +716,8 @@ async def import_project(
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=400, detail=f"无效的JSON格式: {str(e)}")
         
-        # 导入数据
-        import_result = await ImportExportService.import_project(data, db)
+        # 导入数据（传入user_id）
+        import_result = await ImportExportService.import_project(data, db, user_id)
         
         if import_result.success:
             logger.info(f"项目导入成功: {import_result.project_id}")

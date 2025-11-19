@@ -12,6 +12,9 @@ class ChapterBase(BaseModel):
     summary: Optional[str] = Field(None, description="章节摘要")
     word_count: Optional[int] = Field(0, description="字数")
     status: Optional[str] = Field("draft", description="章节状态")
+    outline_id: Optional[str] = Field(None, description="关联的大纲ID")
+    sub_index: Optional[int] = Field(1, description="大纲下的子章节序号")
+    expansion_plan: Optional[str] = Field(None, description="展开规划详情(JSON)")
 
 
 class ChapterCreate(BaseModel):
@@ -22,6 +25,9 @@ class ChapterCreate(BaseModel):
     content: Optional[str] = Field(None, description="章节内容")
     summary: Optional[str] = Field(None, description="章节摘要")
     status: Optional[str] = Field("draft", description="章节状态")
+    outline_id: Optional[str] = Field(None, description="关联的大纲ID")
+    sub_index: Optional[int] = Field(1, description="大纲下的子章节序号")
+    expansion_plan: Optional[str] = Field(None, description="展开规划详情(JSON)")
 
 
 class ChapterUpdate(BaseModel):
@@ -44,6 +50,11 @@ class ChapterResponse(BaseModel):
     summary: Optional[str] = None
     word_count: int = 0
     status: str
+    outline_id: Optional[str] = None
+    sub_index: Optional[int] = 1
+    expansion_plan: Optional[str] = None
+    outline_title: Optional[str] = None  # 大纲标题（从Outline表联查）
+    outline_order: Optional[int] = None  # 大纲排序序号（从Outline表联查）
     created_at: datetime
     updated_at: datetime
     

@@ -21,6 +21,31 @@ class CharacterBase(BaseModel):
     traits: Optional[str] = Field(None, description="特征标签(JSON)")
 
 
+class CharacterCreate(BaseModel):
+    """手动创建角色的请求模型"""
+    project_id: str = Field(..., description="项目ID")
+    name: str = Field(..., description="角色/组织姓名")
+    age: Optional[str] = Field(None, description="年龄")
+    gender: Optional[str] = Field(None, description="性别")
+    is_organization: bool = Field(False, description="是否为组织")
+    role_type: Optional[str] = Field("supporting", description="角色类型：protagonist/supporting/antagonist")
+    personality: Optional[str] = Field(None, description="性格特点/组织特性")
+    background: Optional[str] = Field(None, description="背景故事")
+    appearance: Optional[str] = Field(None, description="外貌特征")
+    relationships: Optional[str] = Field(None, description="人际关系(JSON)")
+    organization_type: Optional[str] = Field(None, description="组织类型")
+    organization_purpose: Optional[str] = Field(None, description="组织目的")
+    organization_members: Optional[str] = Field(None, description="组织成员(JSON)")
+    traits: Optional[str] = Field(None, description="特征标签(JSON)")
+    avatar_url: Optional[str] = Field(None, description="头像URL")
+    
+    # 组织额外字段
+    power_level: Optional[int] = Field(None, description="组织势力等级(0-100)")
+    location: Optional[str] = Field(None, description="组织所在地")
+    motto: Optional[str] = Field(None, description="组织格言/口号")
+    color: Optional[str] = Field(None, description="组织代表颜色")
+
+
 class CharacterUpdate(BaseModel):
     """更新角色的请求模型"""
     name: Optional[str] = None

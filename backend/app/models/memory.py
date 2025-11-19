@@ -9,7 +9,7 @@ class StoryMemory(Base):
     """故事记忆表 - 存储结构化的故事片段和元数据"""
     __tablename__ = "story_memories"
     
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String(100), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     chapter_id = Column(String(36), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
     
@@ -45,7 +45,7 @@ class StoryMemory(Base):
     
     # 伏笔相关字段
     is_foreshadow = Column(Integer, default=0, comment="伏笔状态: 0=普通记忆, 1=已埋下伏笔, 2=伏笔已回收")
-    foreshadow_resolved_at = Column(String(36), ForeignKey("chapters.id", ondelete="SET NULL"), comment="伏笔回收的章节ID")
+    foreshadow_resolved_at = Column(String(100), ForeignKey("chapters.id", ondelete="SET NULL"), comment="伏笔回收的章节ID")
     foreshadow_strength = Column(Float, comment="伏笔强度 0.0-1.0")
     
     # 向量数据库关联

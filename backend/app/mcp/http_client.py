@@ -267,12 +267,25 @@ class HTTPMCPClient:
         start_time = time.time()
         
         try:
-            # 尝试连接并列举工具
+            # 尝试连接并列举工具（直接调用SDK，避免重复日志）
             await self._ensure_connected()
-            tools = await self.list_tools()
+            
+            result = await self._session.list_tools()
+            
+            # 转换为字典格式
+            tools = []
+            for tool in result.tools:
+                tool_dict = {
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "inputSchema": tool.inputSchema
+                }
+                tools.append(tool_dict)
             
             end_time = time.time()
             response_time = round((end_time - start_time) * 1000, 2)
+            
+            logger.info(f"✅ 连接测试成功，获取到 {len(tools)} 个工具")
             
             return {
                 "success": True,

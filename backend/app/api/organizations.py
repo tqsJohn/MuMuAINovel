@@ -1,12 +1,13 @@
 """组织管理API"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator
 from pydantic import BaseModel, Field
 import json
 
 from app.database import get_db
+from app.utils.sse_response import SSEResponse, create_sse_response
 from app.models.relationship import Organization, OrganizationMember
 from app.models.character import Character
 from app.models.project import Project
@@ -31,6 +32,26 @@ router = APIRouter(prefix="/organizations", tags=["组织管理"])
 logger = get_logger(__name__)
 
 
+async def verify_project_access(project_id: str, user_id: str, db: AsyncSession) -> Project:
+    """验证用户是否有权访问指定项目"""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="未登录")
+    
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.user_id == user_id
+        )
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        logger.warning(f"项目访问被拒绝: project_id={project_id}, user_id={user_id}")
+        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
+    
+    return project
+
+
 class OrganizationGenerateRequest(BaseModel):
     """AI生成组织的请求模型"""
     project_id: str = Field(..., description="项目ID")
@@ -44,8 +65,13 @@ class OrganizationGenerateRequest(BaseModel):
 @router.get("/project/{project_id}", response_model=List[OrganizationDetailResponse], summary="获取项目的所有组织")
 async def get_project_organizations(
     project_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(project_id, user_id, db)
+    
     """
     获取项目中的所有组织及其详情
     
@@ -85,6 +111,7 @@ async def get_project_organizations(
 @router.get("/{org_id}", response_model=OrganizationResponse, summary="获取组织详情")
 async def get_organization(
     org_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """获取组织的详细信息"""
@@ -96,12 +123,17 @@ async def get_organization(
     if not org:
         raise HTTPException(status_code=404, detail="组织不存在")
     
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(org.project_id, user_id, db)
+    
     return org
 
 
-@router.post("/", response_model=OrganizationResponse, summary="创建组织")
+@router.post("", response_model=OrganizationResponse, summary="创建组织")
 async def create_organization(
     organization: OrganizationCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -110,6 +142,10 @@ async def create_organization(
     - 需要关联到一个已存在的角色记录（is_organization=True）
     - 可以设置父组织、势力等级等属性
     """
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(organization.project_id, user_id, db)
+    
     # 验证角色是否存在且是组织
     char_result = await db.execute(
         select(Character).where(Character.id == organization.character_id)
@@ -142,6 +178,7 @@ async def create_organization(
 async def update_organization(
     org_id: str,
     organization: OrganizationUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """更新组织的属性"""
@@ -152,6 +189,10 @@ async def update_organization(
     
     if not db_org:
         raise HTTPException(status_code=404, detail="组织不存在")
+    
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(db_org.project_id, user_id, db)
     
     # 更新字段
     update_data = organization.model_dump(exclude_unset=True)
@@ -168,6 +209,7 @@ async def update_organization(
 @router.delete("/{org_id}", summary="删除组织")
 async def delete_organization(
     org_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """删除组织（会级联删除所有成员关系）"""
@@ -178,6 +220,10 @@ async def delete_organization(
     
     if not db_org:
         raise HTTPException(status_code=404, detail="组织不存在")
+    
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(db_org.project_id, user_id, db)
     
     await db.delete(db_org)
     await db.commit()
@@ -191,6 +237,7 @@ async def delete_organization(
 @router.get("/{org_id}/members", response_model=List[OrganizationMemberDetailResponse], summary="获取组织成员")
 async def get_organization_members(
     org_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -202,8 +249,13 @@ async def get_organization_members(
     org_result = await db.execute(
         select(Organization).where(Organization.id == org_id)
     )
-    if not org_result.scalar_one_or_none():
+    org = org_result.scalar_one_or_none()
+    if not org:
         raise HTTPException(status_code=404, detail="组织不存在")
+    
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(org.project_id, user_id, db)
     
     # 获取成员列表
     result = await db.execute(
@@ -244,6 +296,7 @@ async def get_organization_members(
 async def add_organization_member(
     org_id: str,
     member: OrganizationMemberCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -259,6 +312,10 @@ async def add_organization_member(
     org = org_result.scalar_one_or_none()
     if not org:
         raise HTTPException(status_code=404, detail="组织不存在")
+    
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(org.project_id, user_id, db)
     
     # 验证角色存在
     char_result = await db.execute(
@@ -304,6 +361,7 @@ async def add_organization_member(
 async def update_organization_member(
     member_id: str,
     member: OrganizationMemberUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """更新组织成员的职位、忠诚度等信息"""
@@ -314,6 +372,14 @@ async def update_organization_member(
     
     if not db_member:
         raise HTTPException(status_code=404, detail="成员记录不存在")
+    
+    # 通过成员所属的组织验证用户权限
+    org_result = await db.execute(
+        select(Organization).where(Organization.id == db_member.organization_id)
+    )
+    org = org_result.scalar_one()
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(org.project_id, user_id, db)
     
     # 更新字段
     update_data = member.model_dump(exclude_unset=True)
@@ -330,6 +396,7 @@ async def update_organization_member(
 @router.delete("/members/{member_id}", summary="移除组织成员")
 async def remove_organization_member(
     member_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -350,6 +417,10 @@ async def remove_organization_member(
         select(Organization).where(Organization.id == db_member.organization_id)
     )
     org = org_result.scalar_one()
+    
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(org.project_id, user_id, db)
     org.member_count = max(0, org.member_count - 1)
     
     await db.delete(db_member)
@@ -360,7 +431,8 @@ async def remove_organization_member(
 
 @router.post("/generate", response_model=CharacterResponse, summary="AI生成组织")
 async def generate_organization(
-    request: OrganizationGenerateRequest,
+    gen_request: OrganizationGenerateRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
     user_ai_service: AIService = Depends(get_user_ai_service)
 ):
@@ -372,19 +444,15 @@ async def generate_organization(
     
     生成内容包括：组织名称、类型、特性、背景、目的、势力等级等
     """
-    # 验证项目是否存在并获取项目信息
-    result = await db.execute(
-        select(Project).where(Project.id == request.project_id)
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    # 验证用户权限
+    user_id = getattr(http_request.state, 'user_id', None)
+    project = await verify_project_access(gen_request.project_id, user_id, db)
     
     try:
         # 获取已存在的角色和组织列表
         existing_chars_result = await db.execute(
             select(Character)
-            .where(Character.project_id == request.project_id)
+            .where(Character.project_id == gen_request.project_id)
             .order_by(Character.created_at.desc())
         )
         existing_characters = existing_chars_result.scalars().all()
@@ -422,10 +490,10 @@ async def generate_organization(
         # 构建用户输入信息
         user_input = f"""
 用户要求：
-- 组织名称：{request.name or '请AI生成'}
-- 组织类型：{request.organization_type or '请AI根据世界观决定'}
-- 背景设定：{request.background or '无特殊要求'}
-- 其他要求：{request.requirements or '无'}
+- 组织名称：{gen_request.name or '请AI生成'}
+- 组织类型：{gen_request.organization_type or '请AI根据世界观决定'}
+- 背景设定：{gen_request.background or '无特殊要求'}
+- 其他要求：{gen_request.requirements or '无'}
 """
         
         # 使用统一的提示词服务
@@ -435,10 +503,10 @@ async def generate_organization(
         )
         
         # 调用AI生成组织
-        logger.info(f"🎯 开始为项目 {request.project_id} 生成组织")
-        logger.info(f"  - 组织名：{request.name or 'AI生成'}")
-        logger.info(f"  - 组织类型：{request.organization_type or 'AI决定'}")
-        logger.info(f"  - 背景设定：{request.background or '无'}")
+        logger.info(f"🎯 开始为项目 {gen_request.project_id} 生成组织")
+        logger.info(f"  - 组织名：{gen_request.name or 'AI生成'}")
+        logger.info(f"  - 组织类型：{gen_request.organization_type or 'AI决定'}")
+        logger.info(f"  - 背景设定：{gen_request.background or '无'}")
         logger.info(f"  - AI提供商：{user_ai_service.api_provider}")
         logger.info(f"  - AI模型：{user_ai_service.default_model}")
         logger.info(f"  - Prompt长度：{len(prompt)} 字符")
@@ -492,8 +560,8 @@ async def generate_organization(
         
         # 创建角色记录（组织也是角色的一种）
         character = Character(
-            project_id=request.project_id,
-            name=organization_data.get("name", request.name or "未命名组织"),
+            project_id=gen_request.project_id,
+            name=organization_data.get("name", gen_request.name or "未命名组织"),
             is_organization=True,
             role_type="supporting",  # 组织通常作为配角
             personality=organization_data.get("personality", ""),
@@ -518,7 +586,7 @@ async def generate_organization(
         # 自动创建Organization详情记录
         organization = Organization(
             character_id=character.id,
-            project_id=request.project_id,
+            project_id=gen_request.project_id,
             member_count=0,
             power_level=organization_data.get("power_level", 50),
             location=organization_data.get("location"),
@@ -532,7 +600,7 @@ async def generate_organization(
         
         # 记录生成历史
         history = GenerationHistory(
-            project_id=request.project_id,
+            project_id=gen_request.project_id,
             prompt=prompt,
             generated_content=ai_content, 
             model=user_ai_service.default_model
@@ -542,10 +610,202 @@ async def generate_organization(
         await db.commit()
         await db.refresh(character)
         
-        logger.info(f"🎉 成功为项目 {request.project_id} 生成组织: {character.name}")
+        logger.info(f"🎉 成功为项目 {gen_request.project_id} 生成组织: {character.name}")
         
         return character
         
     except Exception as e:
         logger.error(f"生成组织失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"生成组织失败: {str(e)}")
+
+
+@router.post("/generate-stream", summary="AI生成组织（流式）")
+async def generate_organization_stream(
+    gen_request: OrganizationGenerateRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_ai_service: AIService = Depends(get_user_ai_service)
+):
+    """
+    使用AI生成组织设定（支持SSE流式进度显示）
+    
+    通过Server-Sent Events返回实时进度信息
+    """
+    async def generate() -> AsyncGenerator[str, None]:
+        try:
+            # 验证用户权限和项目是否存在
+            user_id = getattr(http_request.state, 'user_id', None)
+            project = await verify_project_access(gen_request.project_id, user_id, db)
+            
+            yield await SSEResponse.send_progress("开始生成组织...", 0)
+            
+            # 获取已存在的角色和组织列表
+            yield await SSEResponse.send_progress("获取项目上下文...", 10)
+            
+            existing_chars_result = await db.execute(
+                select(Character)
+                .where(Character.project_id == gen_request.project_id)
+                .order_by(Character.created_at.desc())
+            )
+            existing_characters = existing_chars_result.scalars().all()
+            
+            # 构建现有角色和组织信息摘要
+            existing_info = ""
+            character_list = []
+            organization_list = []
+            
+            if existing_characters:
+                for c in existing_characters[:10]:
+                    if c.is_organization:
+                        organization_list.append(f"- {c.name} [{c.organization_type or '组织'}]")
+                    else:
+                        character_list.append(f"- {c.name}（{c.role_type or '未知'}）")
+                
+                if character_list:
+                    existing_info += "\n已有角色：\n" + "\n".join(character_list)
+                if organization_list:
+                    existing_info += "\n\n已有组织：\n" + "\n".join(organization_list)
+            
+            # 构建项目上下文
+            project_context = f"""
+项目信息：
+- 书名：{project.title}
+- 主题：{project.theme or '未设定'}
+- 类型：{project.genre or '未设定'}
+- 时间背景：{project.world_time_period or '未设定'}
+- 地理位置：{project.world_location or '未设定'}
+- 氛围基调：{project.world_atmosphere or '未设定'}
+- 世界规则：{project.world_rules or '未设定'}
+{existing_info}
+"""
+            
+            user_input = f"""
+用户要求：
+- 组织名称：{gen_request.name or '请AI生成'}
+- 组织类型：{gen_request.organization_type or '请AI根据世界观决定'}
+- 背景设定：{gen_request.background or '无特殊要求'}
+- 其他要求：{gen_request.requirements or '无'}
+"""
+            
+            yield await SSEResponse.send_progress("构建AI提示词...", 20)
+            
+            prompt = prompt_service.get_single_organization_prompt(
+                project_context=project_context,
+                user_input=user_input
+            )
+            
+            yield await SSEResponse.send_progress("调用AI服务生成组织...", 30)
+            logger.info(f"🎯 开始为项目 {gen_request.project_id} 生成组织（SSE流式）")
+            
+            try:
+                ai_response = await user_ai_service.generate_text(prompt=prompt)
+                ai_content = ai_response.get("content", "") if isinstance(ai_response, dict) else str(ai_response)
+            except Exception as ai_error:
+                logger.error(f"❌ AI服务调用异常：{str(ai_error)}")
+                yield await SSEResponse.send_error(f"AI服务调用失败：{str(ai_error)}")
+                return
+            
+            if not ai_content or not ai_content.strip():
+                yield await SSEResponse.send_error("AI服务返回空响应")
+                return
+            
+            yield await SSEResponse.send_progress("解析AI响应...", 60)
+            
+            # 清理AI响应
+            cleaned_response = ai_content.strip()
+            if cleaned_response.startswith("```json"):
+                cleaned_response = cleaned_response[7:]
+            if cleaned_response.startswith("```"):
+                cleaned_response = cleaned_response[3:]
+            if cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response[:-3]
+            cleaned_response = cleaned_response.strip()
+            
+            try:
+                organization_data = json.loads(cleaned_response)
+            except json.JSONDecodeError as e:
+                yield await SSEResponse.send_error(f"AI返回的内容无法解析为JSON：{str(e)}")
+                return
+            
+            yield await SSEResponse.send_progress("创建组织记录...", 75)
+            
+            # 创建角色记录（组织也是角色的一种）
+            character = Character(
+                project_id=gen_request.project_id,
+                name=organization_data.get("name", gen_request.name or "未命名组织"),
+                is_organization=True,
+                role_type="supporting",
+                personality=organization_data.get("personality", ""),
+                background=organization_data.get("background", ""),
+                appearance=organization_data.get("appearance", ""),
+                organization_type=organization_data.get("organization_type"),
+                organization_purpose=organization_data.get("organization_purpose"),
+                organization_members=json.dumps(
+                    organization_data.get("organization_members", []), 
+                    ensure_ascii=False
+                ),
+                traits=json.dumps(
+                    organization_data.get("traits", []), 
+                    ensure_ascii=False
+                )
+            )
+            db.add(character)
+            await db.flush()
+            
+            logger.info(f"✅ 组织角色创建成功：{character.name} (ID: {character.id})")
+            
+            yield await SSEResponse.send_progress("创建组织详情...", 85)
+            
+            # 自动创建Organization详情记录
+            organization = Organization(
+                character_id=character.id,
+                project_id=gen_request.project_id,
+                member_count=0,
+                power_level=organization_data.get("power_level", 50),
+                location=organization_data.get("location"),
+                motto=organization_data.get("motto"),
+                color=organization_data.get("color")
+            )
+            db.add(organization)
+            await db.flush()
+            
+            logger.info(f"✅ 组织详情创建成功：{character.name} (Org ID: {organization.id})")
+            
+            yield await SSEResponse.send_progress("保存生成历史...", 95)
+            
+            # 记录生成历史
+            history = GenerationHistory(
+                project_id=gen_request.project_id,
+                prompt=prompt,
+                generated_content=ai_content,
+                model=user_ai_service.default_model
+            )
+            db.add(history)
+            
+            await db.commit()
+            await db.refresh(character)
+            
+            logger.info(f"🎉 成功生成组织: {character.name}")
+            
+            yield await SSEResponse.send_progress("组织生成完成！", 100, "success")
+            
+            # 发送结果数据
+            yield await SSEResponse.send_result({
+                "character": {
+                    "id": character.id,
+                    "name": character.name,
+                    "organization_type": character.organization_type,
+                    "is_organization": character.is_organization
+                }
+            })
+            
+            yield await SSEResponse.send_done()
+            
+        except HTTPException as he:
+            logger.error(f"HTTP异常: {he.detail}")
+            yield await SSEResponse.send_error(he.detail, he.status_code)
+        except Exception as e:
+            logger.error(f"生成组织失败: {str(e)}")
+            yield await SSEResponse.send_error(f"生成组织失败: {str(e)}")
+    
+    return create_sse_response(generate())

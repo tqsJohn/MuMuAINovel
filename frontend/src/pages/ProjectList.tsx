@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Button, Empty, Modal, message, Spin, Row, Col, Statistic, Space, Tag, Progress, Typography, Tooltip, Badge, Alert, Upload, Checkbox, Divider, Switch, Dropdown } from 'antd';
-import { EditOutlined, DeleteOutlined, BookOutlined, RocketOutlined, CalendarOutlined, FileTextOutlined, TrophyOutlined, FireOutlined, SettingOutlined, InfoCircleOutlined, CloseOutlined, UploadOutlined, DownloadOutlined, ApiOutlined, MoreOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, BookOutlined, RocketOutlined, CalendarOutlined, FileTextOutlined, TrophyOutlined, FireOutlined, SettingOutlined, InfoCircleOutlined, CloseOutlined, UploadOutlined, DownloadOutlined, ApiOutlined, MoreOutlined, BulbOutlined } from '@ant-design/icons';
 import { projectApi } from '../services/api';
 import { useStore } from '../store';
 import { useProjectSync } from '../store/hooks';
@@ -73,23 +73,8 @@ export default function ProjectList() {
   };
 
   const handleEnterProject = (id: string) => {
-    const project = projects.find(p => p.id === id);
-    if (project) {
-      console.log('项目信息:', {
-        id: project.id,
-        title: project.title,
-        wizard_status: project.wizard_status,
-        wizard_step: project.wizard_step
-      });
-      
-      if (project.wizard_status === 'incomplete' || !project.wizard_status) {
-        console.log('向导未完成，跳转到向导页面');
-        navigate(`/wizard?projectId=${id}&step=${project.wizard_step || 0}`);
-      } else {
-        console.log('向导已完成，进入项目管理界面');
-        navigate(`/project/${id}`);
-      }
-    }
+    // 简化后直接进入项目，不再检查向导状态
+    navigate(`/project/${id}`);
   };
 
   const getStatusTag = (status: string) => {
@@ -207,8 +192,8 @@ export default function ProjectList() {
     setSelectedProjectIds([]);
   };
 
-  // 获取可导出的项目（过滤掉向导未完成的项目）
-  const exportableProjects = projects.filter(p => p.wizard_status === 'completed');
+  // 获取所有可导出的项目
+  const exportableProjects = projects;
 
   // 关闭导出对话框
   const handleCloseExportModal = () => {
@@ -322,92 +307,139 @@ export default function ProjectList() {
             </Col>
             <Col xs={24} sm={12} md={14}>
               {window.innerWidth <= 768 ? (
-                // 移动端：按钮分两行显示
+                // 移动端：优化布局
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Space size={8} style={{ width: '100%' }}>
-                    <Button
-                      type="primary"
-                      size="middle"
-                      icon={<RocketOutlined />}
-                      onClick={() => navigate('/wizard')}
-                      style={{
-                        flex: 1,
-                        borderRadius: 8,
-                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                        border: 'none',
-                        boxShadow: '0 2px 8px rgba(102, 126, 234, 0.4)'
-                      }}
-                    >
-                      向导创建
-                    </Button>
-                    <Button
-                      type="default"
-                      size="middle"
-                      icon={<SettingOutlined />}
-                      onClick={() => navigate('/settings')}
-                      style={{
-                        flex: 1,
-                        borderRadius: 8,
-                        borderColor: '#d9d9d9',
-                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)'
-                      }}
-                    >
-                      API设置
-                    </Button>
-                    <UserMenu />
-                  </Space>
-                  <Space size={8} style={{ width: '100%' }}>
-                    <Button
-                      type="default"
-                      size="middle"
-                      icon={<DownloadOutlined />}
-                      onClick={handleOpenExportModal}
-                      disabled={exportableProjects.length === 0}
-                      style={{
-                        flex: 1,
-                        borderRadius: 8,
-                        borderColor: '#1890ff',
-                        color: '#1890ff',
-                        boxShadow: '0 2px 8px rgba(24, 144, 255, 0.2)'
-                      }}
-                    >
-                      导出
-                    </Button>
-                    <Button
-                      type="default"
-                      size="middle"
-                      icon={<UploadOutlined />}
-                      onClick={() => setImportModalVisible(true)}
-                      style={{
-                        flex: 1,
-                        borderRadius: 8,
-                        borderColor: '#52c41a',
-                        color: '#52c41a',
-                        boxShadow: '0 2px 8px rgba(82, 196, 26, 0.2)'
-                      }}
-                    >
-                      导入
-                    </Button>
-                    <Button
-                      type="default"
-                      size="middle"
-                      icon={<ApiOutlined />}
-                      onClick={() => navigate('/mcp-plugins')}
-                      style={{
-                        flex: 1,
-                        borderRadius: 8,
-                        borderColor: '#722ed1',
-                        color: '#722ed1',
-                        boxShadow: '0 2px 8px rgba(114, 46, 209, 0.2)'
-                      }}
-                    >
-                      MCP
-                    </Button>
-                  </Space>
+                  {/* 第一行：主要创建按钮 */}
+                  <Row gutter={8}>
+                    <Col span={12}>
+                      <Button
+                        type="primary"
+                        size="middle"
+                        icon={<BulbOutlined />}
+                        onClick={() => navigate('/inspiration')}
+                        block
+                        style={{
+                          borderRadius: 8,
+                          background: 'linear-gradient(135deg, #ffd700 0%, #ff8c00 100%)',
+                          border: 'none',
+                          boxShadow: '0 2px 8px rgba(255, 215, 0, 0.4)',
+                          color: '#fff',
+                          height: 40
+                        }}
+                      >
+                        灵感模式
+                      </Button>
+                    </Col>
+                    <Col span={12}>
+                      <Button
+                        type="primary"
+                        size="middle"
+                        icon={<RocketOutlined />}
+                        onClick={() => navigate('/wizard')}
+                        block
+                        style={{
+                          borderRadius: 8,
+                          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                          border: 'none',
+                          boxShadow: '0 2px 8px rgba(102, 126, 234, 0.4)',
+                          height: 40
+                        }}
+                      >
+                        向导创建
+                      </Button>
+                    </Col>
+                  </Row>
+                  {/* 第二行：功能按钮 */}
+                  <Row gutter={8}>
+                    <Col span={8}>
+                      <Button
+                        type="default"
+                        size="middle"
+                        icon={<SettingOutlined />}
+                        onClick={() => navigate('/settings')}
+                        block
+                        style={{
+                          borderRadius: 8,
+                          borderColor: '#d9d9d9',
+                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                          height: 36,
+                          padding: '0 8px'
+                        }}
+                      >
+                        设置
+                      </Button>
+                    </Col>
+                    <Col span={8}>
+                      <Dropdown
+                        menu={{
+                          items: [
+                            {
+                              key: 'export',
+                              label: '导出项目',
+                              icon: <DownloadOutlined />,
+                              onClick: handleOpenExportModal,
+                              disabled: exportableProjects.length === 0
+                            },
+                            {
+                              key: 'import',
+                              label: '导入项目',
+                              icon: <UploadOutlined />,
+                              onClick: () => setImportModalVisible(true)
+                            },
+                            {
+                              type: 'divider'
+                            },
+                            {
+                              key: 'mcp',
+                              label: 'MCP插件',
+                              icon: <ApiOutlined />,
+                              onClick: () => navigate('/mcp-plugins')
+                            }
+                          ]
+                        }}
+                        placement="bottomRight"
+                        trigger={['click']}
+                      >
+                        <Button
+                          size="middle"
+                          icon={<MoreOutlined />}
+                          block
+                          style={{
+                            borderRadius: 8,
+                            borderColor: '#d9d9d9',
+                            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                            height: 36
+                          }}
+                        >
+                          更多
+                        </Button>
+                      </Dropdown>
+                    </Col>
+                    <Col span={8}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <UserMenu />
+                      </div>
+                    </Col>
+                  </Row>
                 </Space>
               ) : (
                 // PC端：优化后的布局 - 主要按钮 + 下拉菜单
                 <Space size={12} style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button
+                    type="primary"
+                    size="large"
+                    icon={<BulbOutlined />}
+                    onClick={() => navigate('/inspiration')}
+                    style={{
+                      borderRadius: 8,
+                      background: 'linear-gradient(135deg, #ffd700 0%, #ff8c00 100%)',
+                      border: 'none',
+                      boxShadow: '0 2px 8px rgba(255, 215, 0, 0.4)',
+                      color: '#fff'
+                    }}
+                  >
+                    灵感模式
+                  </Button>
                   <Button
                     type="primary"
                     size="large"
@@ -614,14 +646,29 @@ export default function ProjectList() {
                     <Text style={{ fontSize: 16, color: '#8c8c8c' }}>
                       还没有项目，开始创建你的第一个小说项目吧！
                     </Text>
-                    <Button
-                      type="primary"
-                      size="large"
-                      icon={<RocketOutlined />}
-                      onClick={() => navigate('/wizard')}
-                    >
-                      向导创建
-                    </Button>
+                    <Space size={12}>
+                      <Button
+                        type="primary"
+                        size="large"
+                        icon={<BulbOutlined />}
+                        onClick={() => navigate('/inspiration')}
+                        style={{
+                          background: 'linear-gradient(135deg, #ffd700 0%, #ff8c00 100%)',
+                          border: 'none',
+                          color: '#fff'
+                        }}
+                      >
+                        灵感模式
+                      </Button>
+                      <Button
+                        type="primary"
+                        size="large"
+                        icon={<RocketOutlined />}
+                        onClick={() => navigate('/wizard')}
+                      >
+                        向导创建
+                      </Button>
+                    </Space>
                   </Space>
                 }
                 style={{ padding: '80px 0' }}
@@ -631,12 +678,11 @@ export default function ProjectList() {
             <Row gutter={[16, 16]}>
               {projects.map((project) => {
                 const progress = getProgress(project.current_words, project.target_words || 0);
-                const isWizardComplete = project.wizard_status === 'completed';
                 
                 return (
                   <Col {...gridConfig} key={project.id}>
                     <Badge.Ribbon
-                      text={isWizardComplete ? getStatusTag(project.status) : <Tag color="orange" icon={<RocketOutlined />}>创建中</Tag>}
+                      text={getStatusTag(project.status)}
                       color="transparent"
                       style={{ top: 12, right: 12 }}
                     >
@@ -680,68 +726,49 @@ export default function ProjectList() {
                             {project.description || '暂无描述'}
                           </Paragraph>
 
-                          {isWizardComplete ? (
-                            <>
-                              {project.target_words && project.target_words > 0 && (
-                                <div style={{ marginBottom: 16 }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                                    <Text type="secondary" style={{ fontSize: 12 }}>完成进度</Text>
-                                    <Text strong style={{ fontSize: 12 }}>{progress}%</Text>
-                                  </div>
-                                  <Progress
-                                    percent={progress}
-                                    strokeColor={getProgressColor(progress)}
-                                    showInfo={false}
-                                    size={{ height: 8 }}
-                                  />
-                                </div>
-                              )}
-
-                              <Row gutter={12}>
-                                <Col span={12}>
-                                  <div style={{
-                                    textAlign: 'center',
-                                    padding: '12px 0',
-                                    background: '#f5f5f5',
-                                    borderRadius: 8
-                                  }}>
-                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: '#1890ff' }}>
-                                      {(project.current_words / 1000).toFixed(1)}K
-                                    </div>
-                                    <Text type="secondary" style={{ fontSize: 12 }}>已写字数</Text>
-                                  </div>
-                                </Col>
-                                <Col span={12}>
-                                  <div style={{
-                                    textAlign: 'center',
-                                    padding: '12px 0',
-                                    background: '#f5f5f5',
-                                    borderRadius: 8
-                                  }}>
-                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: '#52c41a' }}>
-                                      {project.target_words ? (project.target_words / 1000).toFixed(0) + 'K' : '--'}
-                                    </div>
-                                    <Text type="secondary" style={{ fontSize: 12 }}>目标字数</Text>
-                                  </div>
-                                </Col>
-                              </Row>
-                            </>
-                          ) : (
-                            <div style={{
-                              textAlign: 'center',
-                              padding: '24px 0',
-                              background: '#f5f5f5',
-                              borderRadius: 8
-                            }}>
-                              <RocketOutlined style={{ fontSize: 32, color: '#faad14', marginBottom: 12 }} />
-                              <div style={{ color: '#faad14', fontWeight: 'bold', marginBottom: 4 }}>
-                                项目创建中
+                          {project.target_words && project.target_words > 0 && (
+                            <div style={{ marginBottom: 16 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                                <Text type="secondary" style={{ fontSize: 12 }}>完成进度</Text>
+                                <Text strong style={{ fontSize: 12 }}>{progress}%</Text>
                               </div>
-                              <Text type="secondary" style={{ fontSize: 12 }}>
-                                点击继续创建向导
-                              </Text>
+                              <Progress
+                                percent={progress}
+                                strokeColor={getProgressColor(progress)}
+                                showInfo={false}
+                                size={{ height: 8 }}
+                              />
                             </div>
                           )}
+
+                          <Row gutter={12}>
+                            <Col span={12}>
+                              <div style={{
+                                textAlign: 'center',
+                                padding: '12px 0',
+                                background: '#f5f5f5',
+                                borderRadius: 8
+                              }}>
+                                <div style={{ fontSize: 20, fontWeight: 'bold', color: '#1890ff' }}>
+                                  {(project.current_words / 1000).toFixed(1)}K
+                                </div>
+                                <Text type="secondary" style={{ fontSize: 12 }}>已写字数</Text>
+                              </div>
+                            </Col>
+                            <Col span={12}>
+                              <div style={{
+                                textAlign: 'center',
+                                padding: '12px 0',
+                                background: '#f5f5f5',
+                                borderRadius: 8
+                              }}>
+                                <div style={{ fontSize: 20, fontWeight: 'bold', color: '#52c41a' }}>
+                                  {project.target_words ? (project.target_words / 1000).toFixed(0) + 'K' : '--'}
+                                </div>
+                                <Text type="secondary" style={{ fontSize: 12 }}>目标字数</Text>
+                              </div>
+                            </Col>
+                          </Row>
 
                           <div style={{ 
                             marginTop: 16, 
@@ -1059,6 +1086,7 @@ export default function ProjectList() {
           )}
         </Space>
       </Modal>
+
     </div>
   );
 }

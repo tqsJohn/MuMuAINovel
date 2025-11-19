@@ -87,7 +87,7 @@ class MemoryService:
                     'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
                     cache_folder=model_cache_dir,
                     device='cpu',  # 明确指定使用CPU
-                    trust_remote_code=False  # 安全起见
+                    trust_remote_code=False,  # 安全起见
                 )
                 logger.info("✅ Embedding模型加载成功 (paraphrase-multilingual-MiniLM-L12-v2)")
             except Exception as e:

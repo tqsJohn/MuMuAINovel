@@ -38,7 +38,7 @@ class CharacterRelationship(Base):
     relationship_name = Column(String(100), comment="自定义关系名称")
     
     # 关系属性
-    intimacy_level = Column(Integer, default=50, comment="亲密度：0-100")
+    intimacy_level = Column(Integer, default=50, comment="亲密度：-100到100")
     status = Column(String(20), default="active", comment="状态：active/broken/past/complicated")
     description = Column(Text, comment="关系详细描述")
     
@@ -75,7 +75,7 @@ class Organization(Base):
     
     # 组织特色
     motto = Column(String(200), comment="宗旨/口号")
-    color = Column(String(20), comment="代表颜色")
+    color = Column(String(100), comment="代表颜色")
     
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")

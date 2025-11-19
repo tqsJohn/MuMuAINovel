@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 from pathlib import Path
 import logging
+import os
 
 # 获取项目根目录(从backend/app/config.py向上两级)
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -12,13 +13,11 @@ DATA_DIR.mkdir(exist_ok=True)
 # 配置模块使用标准logging（在logger.py初始化之前）
 config_logger = logging.getLogger(__name__)
 
-# 数据库文件路径(绝对路径)
-DB_FILE = DATA_DIR / "ai_story.db"
+# 数据库配置：PostgreSQL
+# 从环境变量获取数据库URL
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://mumuai:password@localhost:5432/mumuai_novel")
 
-# 生成数据库URL(在类外部生成，确保使用绝对路径)
-# 将Windows反斜杠转换为正斜杠，SQLite URL格式要求
-DATABASE_URL = f"sqlite+aiosqlite:///{str(DB_FILE.absolute()).replace(chr(92), '/')}"
-config_logger.debug(f"数据库文件路径: {DB_FILE}")
+config_logger.debug(f"数据库类型: PostgreSQL")
 config_logger.debug(f"数据库URL: {DATABASE_URL}")
 
 class Settings(BaseSettings):
@@ -41,8 +40,25 @@ class Settings(BaseSettings):
     # CORS配置
     cors_origins: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]
     
-    # 数据库配置 - 使用预先计算好的绝对路径URL
+    # 数据库配置 - PostgreSQL
     database_url: str = DATABASE_URL
+    
+    # PostgreSQL连接池配置（优化后支持80-150并发用户）
+    database_pool_size: int = 30  # 核心连接池大小（从20提升到30）
+    database_max_overflow: int = 20  # 最大溢出连接数（从10提升到20）
+    database_pool_timeout: int = 60  # 连接池超时秒数（从30提升到60）
+    database_pool_recycle: int = 1800  # 连接回收时间秒数（从3600降低到1800，30分钟）
+    database_pool_pre_ping: bool = True  # 连接前ping检测，确保连接有效
+    database_pool_use_lifo: bool = True  # 使用LIFO策略提高连接复用率
+    
+    # 会话监控配置
+    database_session_max_active: int = 50  # 活跃会话警告阈值（从100降低到50）
+    database_session_leak_threshold: int = 100  # 会话泄漏严重告警阈值
+    
+    # 数据库监控配置
+    database_enable_slow_query_log: bool = True  # 启用慢查询日志
+    database_slow_query_threshold: float = 1.0  # 慢查询阈值（秒）
+    database_enable_metrics: bool = True  # 启用性能指标收集
     
     # AI服务配置
     openai_api_key: Optional[str] = None
@@ -85,6 +101,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # 忽略未定义的环境变量，避免验证错误
 
 
 # 创建全局配置实例

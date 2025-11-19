@@ -202,6 +202,21 @@ export interface CharacterUpdate {
   color?: string;
 }
 
+// 展开规划数据结构
+export interface ExpansionPlanData {
+  key_events: string[];
+  character_focus: string[];
+  emotional_tone: string;
+  narrative_goal: string;
+  conflict_type: string;
+  estimated_words: number;
+  scenes?: Array<{
+    location: string;
+    characters: string[];
+    purpose: string;
+  }> | null;
+}
+
 // 章节类型定义
 export interface Chapter {
   id: string;
@@ -212,6 +227,11 @@ export interface Chapter {
   chapter_number: number;
   word_count: number;
   status: 'draft' | 'writing' | 'completed';
+  expansion_plan?: string; // JSON字符串，解析后为ExpansionPlanData
+  outline_id?: string; // 关联的大纲ID
+  sub_index?: number; // 大纲下的子章节序号
+  outline_title?: string; // 大纲标题（从后端联表查询获得）
+  outline_order?: number; // 大纲排序序号（从后端联表查询获得）
   created_at: string;
   updated_at: string;
 }
@@ -282,6 +302,72 @@ export interface OutlineReorderItem {
 
 export interface OutlineReorderRequest {
   orders: OutlineReorderItem[];
+}
+
+// 大纲展开相关类型定义
+export interface ChapterPlanItem {
+  sub_index: number;
+  title: string;
+  plot_summary: string;
+  key_events: string[];
+  character_focus: string[];
+  emotional_tone: string;
+  narrative_goal: string;
+  conflict_type: string;
+  estimated_words: number;
+  scenes?: Array<{
+    location: string;
+    characters: string[];
+    purpose: string;
+  }>;
+}
+
+export interface OutlineExpansionRequest {
+  target_chapter_count: number;
+  expansion_strategy?: 'balanced' | 'climax' | 'detail';
+  auto_create_chapters?: boolean;
+  provider?: string;
+  model?: string;
+}
+
+export interface OutlineExpansionResponse {
+  outline_id: string;
+  outline_title: string;
+  target_chapter_count: number;
+  actual_chapter_count: number;
+  expansion_strategy: string;
+  chapter_plans: ChapterPlanItem[];
+  created_chapters?: Array<{
+    id: string;
+    chapter_number: number;
+    title: string;
+    summary: string;
+    outline_id: string;
+    sub_index: number;
+    status: string;
+  }> | null;
+}
+
+export interface BatchOutlineExpansionRequest {
+  project_id: string;
+  outline_ids?: string[];
+  chapters_per_outline: number;
+  expansion_strategy?: 'balanced' | 'climax' | 'detail';
+  auto_create_chapters?: boolean;
+  provider?: string;
+  model?: string;
+}
+
+export interface BatchOutlineExpansionResponse {
+  project_id: string;
+  total_outlines_expanded: number;
+  total_chapters_created: number;
+  expansion_results: OutlineExpansionResponse[];
+  skipped_outlines?: Array<{
+    outline_id: string;
+    outline_title: string;
+    reason: string;
+  }>;
 }
 
 export interface GenerateCharacterRequest {
@@ -390,14 +476,16 @@ export interface ApiError {
 
 // 章节分析任务相关类型
 export interface AnalysisTask {
-  task_id: string;
+  has_task: boolean;
+  task_id: string | null;
   chapter_id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'none';
   progress: number;
-  error_message?: string;
-  created_at?: string;
-  started_at?: string;
-  completed_at?: string;
+  error_message?: string | null;
+  auto_recovered?: boolean;
+  created_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
 }
 
 // 分析结果 - 钩子

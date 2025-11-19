@@ -6,12 +6,11 @@
 ![Python](https://img.shields.io/badge/python-3.11-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.109.0-green.svg)
 ![React](https://img.shields.io/badge/react-18.3.1-blue.svg)
-![TypeScript](https://img.shields.io/badge/typescript-5.9.3-blue.svg)
 ![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
 
-**一款基于 AI 的智能小说创作助手，帮助你轻松创作精彩故事**
+**基于 AI 的智能小说创作助手**
 
-[特性](#-特性) • [快速开始](#-快速开始) • [部署方式](#-部署方式) • [配置说明](#%EF%B8%8F-配置说明) • [项目结构](#-项目结构)
+[特性](#-特性) • [快速开始](#-快速开始) • [配置说明](#%EF%B8%8F-配置说明) • [项目结构](#-项目结构)
 
 </div>
 
@@ -19,115 +18,226 @@
 
 ## ✨ 特性
 
-- 🤖 **多 AI 模型支持** - 支持 OpenAI、Google Gemini、Anthropic Claude 等主流 AI 模型
-- 📝 **智能向导** - 通过向导式引导快速创建小说项目，AI 自动生成大纲、角色和世界观
-- 👥 **角色管理** - 创建和管理小说角色，包括人物关系、组织架构等
-- 📖 **章节编辑** - 支持章节的创建、编辑、重新生成和润色功能
-- 🌐 **世界观设定** - 构建完整的故事世界观和背景设定
-- 🔐 **多种登录方式** - 支持 LinuxDO OAuth 登录和本地账户登录
-- 🐳 **Docker 部署** - 一键部署，开箱即用
-- 💾 **数据持久化** - 基于 SQLite 的本地数据存储，支持多用户隔离
-- 🎨 **现代化 UI** - 基于 Ant Design 的美观界面，响应式设计
-
+- 🤖 **多 AI 模型** - 支持 OpenAI、Gemini、Claude 等主流模型
+- 📝 **智能向导** - AI 自动生成大纲、角色和世界观
+- 👥 **角色管理** - 人物关系、组织架构可视化管理
+- 📖 **章节编辑** - 支持创建、编辑、重新生成和润色
+- 🌐 **世界观设定** - 构建完整的故事背景
+- 🔐 **多种登录** - LinuxDO OAuth 或本地账户登录
+- 💾 **PostgreSQL** - 生产级数据库，多用户数据隔离
+- 🐳 **Docker 部署** - 一键启动，开箱即用
 
 ## 📋 TODO List
 
-以下是正在规划和开发中的功能：
+- [x] **灵感模式** - 创作灵感和点子生成
+- [x] **自定义写作风格** - 支持自定义 AI 写作风格
+- [x] **数据导入导出** - 项目数据的导入导出
+- [ ] **Prompt 调整界面** - 可视化编辑 Prompt 模板
+- [x] **章节字数限制** - 用户可设置生成字数
+- [ ] **设定追溯与矛盾检测** - 自动检测设定冲突
+- [ ] **思维链与章节关系图谱** - 可视化章节逻辑关系
+- [x] **根据分析一键重写** - 根据分析建议重新生成
+- [x] **Linux DO 自动创建账号** - OAuth 登录自动生成账号
 
-- [ ] **灵感模式** - 提供创作灵感和点子生成功能
-- [✔] **自定义写作风格** - 支持自定义AI写作风格和语言风格
-- [ ] **支持数据导入导出** - 支持项目数据的导入和导出功能
-- [ ] **添加prompt调整界面** - 提供可视化的prompt模板编辑和调整界面
-- [✔] **开放章节内容字数限制** - 支持用户在生成章节内容时设置字数 @wyf007
-- [ ] **设定追溯与矛盾检测** - 对大纲、世界观、角色档案中的设定支持悬停查看注释，显示相关章节来源和佐证原文；自动检测新章节与已有设定的矛盾（吃书），标记为"矛盾"设定并提供解决建议，当新设定解决矛盾后自动更新注释说明 @lulujiang
-- [ ] **思维链与章节关系图谱** - 为每章建立思维链，总结与上文的逻辑关系、明暗线发展；可选的章节关系满图功能，自动识别和标注伏笔埋设与揭晓、角色出场与呼应等内在联系，帮助提升小说结构的紧密性和连贯性 @lulujiang
-
-> 💡 如果你有其他功能建议，欢迎提交 Issue 或 Pull Request！
+> 💡 欢迎提交 Issue 或 Pull Request！
 
 ## 🚀 快速开始
 
 ### 前置要求
 
-- **Docker 部署**：Docker 和 Docker Compose
-- **本地开发**：Python 3.11+ 和 Node.js 18+
-- **必需**：至少一个 AI 服务的 API Key（OpenAI/Gemini/Anthropic）
+- Docker 和 Docker Compose
+- 至少一个 AI 服务的 API Key（OpenAI/Gemini/Claude）
 
-### 方式一：从源码构建 Docker 镜像
+### Docker Compose 部署（推荐）
 
 ```bash
 # 1. 克隆项目
 git clone https://github.com/xiamuceer-j/MuMuAINovel.git
 cd MuMuAINovel
 
-# 2. 配置环境变量
+# 2. 配置环境变量（必需）
 cp backend/.env.example .env
-# 编辑 .env 文件，填入你的 API Keys
+# 编辑 .env 文件，填入必要配置（API Key、数据库密码等）
 
-# 3. 启动服务（会自动构建镜像）
+# 3. 确保文件准备完整
+# ⚠️ 重要：确保以下文件存在
+# - .env（配置文件，必需挂载到容器）
+# - backend/scripts/init_postgres.sql（数据库初始化脚本）
+
+# 4. 启动服务
 docker-compose up -d
 
-# 4. 访问应用
+# 5. 访问应用
 # 打开浏览器访问 http://localhost:8000
 ```
 
-### 方式二：本地开发
+> **📌 注意事项**
+>
+> 1. **`.env` 文件挂载**: `docker-compose.yml` 会自动将 `.env` 挂载到容器，确保文件存在
+> 2. **数据库初始化**: `init_postgres.sql` 会在首次启动时自动执行，安装必要的PostgreSQL扩展
+> 3. **自行构建**: 如需从源码构建，请先下载 embedding 模型文件（[加群获取](https://linux.do/t/topic/1100112)）
 
-#### 后端设置
+### 使用 Docker Hub 镜像（推荐新手）
 
 ```bash
-# 进入后端目录
+# 1. 拉取最新镜像（已包含模型文件）
+docker pull mumujie/mumuainovel:latest
+
+# 2. 配置 .env 文件
+cp backend/.env.example .env
+# 编辑 .env 填入配置
+
+# 3. 启动服务
+docker-compose up -d
+
+# 4. 查看日志
+docker-compose logs -f
+
+# 5. 更新到最新版本
+docker-compose pull
+docker-compose up -d
+```
+
+> **💡 提示**: Docker Hub 镜像已包含所有依赖和模型文件，无需额外下载
+
+### 本地开发 / 从源码构建
+
+#### 前置准备
+
+```bash
+# ⚠️ 重要：如果从源码构建，需要先下载 embedding 模型文件
+# 模型文件较大（约 400MB），需放置到以下目录：
+# backend/embedding/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2/
+#
+# 📥 获取方式：
+# - 加入项目 QQ 群或 Linux DO 讨论区获取下载链接
+# - 群号：见项目主页
+# - Linux DO：https://linux.do/t/topic/1100112
+```
+
+#### 后端
+
+```bash
 cd backend
-
-# 创建虚拟环境
 python -m venv .venv
-
-# 激活虚拟环境
-# Windows:
-.venv\Scripts\activate
-# Linux/Mac:
-source .venv/bin/activate
-
-# 安装依赖
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# 配置环境变量
+# 配置 .env 文件
 cp .env.example .env
-# 编辑 .env 文件，填入你的配置
+# 编辑 .env 填入必要配置
 
-# 启动后端服务
+# 启动 PostgreSQL（可使用 Docker）
+docker run -d --name postgres \
+  -e POSTGRES_PASSWORD=your_password \
+  -e POSTGRES_DB=mumuai_novel \
+  -p 5432:5432 \
+  postgres:18-alpine
+
+# 启动后端
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-#### 前端设置
+#### 前端
 
 ```bash
-# 进入前端目录
 cd frontend
-
-# 安装依赖
 npm install
-
-# 开发模式（需要后端已启动）
-npm run dev
-
-# 或构建生产版本
-npm run build
+npm run dev  # 开发模式
+npm run build  # 生产构建
 ```
 
-## 🐳 部署方式
+## ⚙️ 配置说明
 
-### Docker Compose 部署
+### 必需配置
 
-#### 使用 Docker Hub 镜像（推荐）
-
-项目已发布到 Docker Hub，可直接拉取使用：
+创建 `.env` 文件：
 
 ```bash
-# 查看可用版本
-docker pull mumujie/mumuainovel:latest
+# PostgreSQL 数据库（必需）
+DATABASE_URL=postgresql+asyncpg://mumuai:your_password@postgres:5432/mumuai_novel
+POSTGRES_PASSWORD=your_secure_password
 
+# AI 服务（至少配置一个）
+OPENAI_API_KEY=your_openai_key
+OPENAI_BASE_URL=https://api.openai.com/v1
+DEFAULT_AI_PROVIDER=openai
+DEFAULT_MODEL=gpt-4o-mini
+
+# 本地账户登录
+LOCAL_AUTH_ENABLED=true
+LOCAL_AUTH_USERNAME=admin
+LOCAL_AUTH_PASSWORD=your_password
+```
+
+### 可选配置
+
+```bash
+# Gemini
+GEMINI_API_KEY=your_gemini_key
+
+# Claude
+ANTHROPIC_API_KEY=your_claude_key
+
+# LinuxDO OAuth
+LINUXDO_CLIENT_ID=your_client_id
+LINUXDO_CLIENT_SECRET=your_client_secret
+LINUXDO_REDIRECT_URI=http://localhost:8000/api/auth/callback
+
+# PostgreSQL 连接池（高并发优化）
+DATABASE_POOL_SIZE=30
+DATABASE_MAX_OVERFLOW=20
+```
+
+### 中转 API 配置
+
+支持所有 OpenAI 兼容格式的中转服务：
+
+```bash
+# New API 示例
+OPENAI_API_KEY=sk-xxxxxxxx
+OPENAI_BASE_URL=https://api.new-api.com/v1
+
+# 其他中转服务
+OPENAI_BASE_URL=https://your-proxy-service.com/v1
+```
+
+## 🐳 Docker 部署详情
+
+### 服务架构
+
+- **postgres**: PostgreSQL 18 数据库
+  - 端口: 5432
+  - 数据持久化: `postgres_data` volume
+  - 初始化脚本: `backend/scripts/init_postgres.sql`（自动挂载）
+  - 优化配置: 支持 80-150 并发用户
+
+- **mumuainovel**: 主应用服务
+  - 端口: 8000
+  - 日志目录: `./logs`
+  - 配置挂载: `.env` 文件
+  - 自动等待数据库就绪
+  - 健康检查: 每 30 秒检测一次
+
+### 重要文件说明
+
+| 文件 | 说明 | 是否必需 |
+|------|------|---------|
+| `.env` | 环境配置（API Key、数据库密码等） | ✅ 必需 |
+| `docker-compose.yml` | 服务编排配置 | ✅ 必需 |
+| `backend/scripts/init_postgres.sql` | PostgreSQL 扩展安装脚本 | ✅ 自动挂载 |
+| `backend/embedding/models--*/` | Embedding 模型文件 | ⚠️ 自建需要 |
+
+> **注意**: 使用 Docker Hub 镜像时，模型文件已包含在镜像中，无需额外下载
+
+### 常用命令
+
+```bash
 # 启动服务
 docker-compose up -d
+
+# 查看状态
+docker-compose ps
 
 # 查看日志
 docker-compose logs -f
@@ -138,346 +248,67 @@ docker-compose down
 # 重启服务
 docker-compose restart
 
-# 更新到最新版本
-docker-compose pull
-docker-compose up -d
+# 查看资源使用
+docker stats
 ```
 
-#### Docker Compose 配置文件示例
+### 数据持久化
 
-使用 Docker Hub 镜像的完整配置：
+- `./postgres_data` - PostgreSQL 数据库文件
+- `./logs` - 应用日志文件
+
+### 端口配置
+
+修改 `docker-compose.yml` 中的端口映射：
 
 ```yaml
-services:
-  ai-story:
-    image: mumujie/mumuainovel:latest
-    container_name: mumuainovel
-    ports:
-      - "8800:8000"  # 宿主机端口:容器端口
-    volumes:
-      # 持久化数据库和日志
-      - ./data:/app/data
-      - ./logs:/app/logs
-      # 挂载环境变量文件
-      - ./.env:/app/.env:ro
-    environment:
-      - APP_NAME=mumuainovel
-      - APP_VERSION=1.0.0
-      - APP_HOST=0.0.0.0
-      - APP_PORT=8000
-      - DEBUG=false
-      # 其他环境变量会从 .env 文件自动加载
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    networks:
-      - ai-story-network
-
-networks:
-  ai-story-network:
-    driver: bridge
-```
-
-### 生产环境部署建议
-
-#### 1. 环境变量配置
-
-**必需配置**：
-- `OPENAI_API_KEY` 或 `GEMINI_API_KEY`：至少配置一个 AI 服务
-- `LOCAL_AUTH_PASSWORD`：修改为强密码
-
-**推荐配置**：
-- `OPENAI_BASE_URL`：如果使用中转 API，修改为中转服务地址
-- `DEFAULT_AI_PROVIDER`：根据你的 API Key 选择 `openai`、`gemini` 或 `anthropic`
-- `DEFAULT_MODEL`：选择合适的模型（如 `gpt-4o-mini`、`gemini-2.0-flash-exp`）
-
-#### 2. 数据持久化
-
-数据目录已通过 volume 挂载，数据不会丢失：
-- `./data`：SQLite 数据库文件
-- `./logs`：应用日志文件
-
-#### 3. 端口配置
-
-默认端口映射：`8800:8000`
-- 宿主机端口：`8800`（可自定义修改）
-- 容器内端口：`8000`（固定，不要修改）
-
-访问地址：`http://your-server-ip:8800`
-
-
-配置后记得更新 `.env` 中的 `LINUXDO_REDIRECT_URI` 和 `FRONTEND_URL`。
-
-#### 5. 资源限制（可选）
-
-在 `docker-compose.yml` 中添加资源限制：
-
-```yaml
-services:
-  ai-story:
-    # ... 其他配置
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-```
-
-### 端口说明
-
-- **默认端口**：`8800`（宿主机）→ `8000`（容器）
-- **可自定义**：修改 docker-compose.yml 中的 `ports` 配置
-- **健康检查**：容器内部使用 `8000` 端口进行健康检查
-
-## ⚙️ 配置说明
-
-### 环境变量
-
-创建 `.env` 文件并配置以下变量：
-
-```bash
-# ===== AI 服务配置（必填）=====
-# OpenAI 配置（支持官方API和中转API）
-OPENAI_API_KEY=your_openai_key_here
-OPENAI_BASE_URL=https://api.openai.com/v1
-
-# Anthropic 配置
-# ANTHROPIC_API_KEY=your_anthropic_key_here
-# ANTHROPIC_BASE_URL=https://api.anthropic.com
-
-# 中转API配置示例（使用OpenAI格式）
-# New API 中转服务
-# OPENAI_API_KEY=your_newapi_key_here
-# OPENAI_BASE_URL=https://api.new-api.com/v1
-
-# 默认 AI 提供商和模型
-DEFAULT_AI_PROVIDER=openai
-DEFAULT_MODEL=gpt-4o-mini
-DEFAULT_TEMPERATURE=0.8
-DEFAULT_MAX_TOKENS=32000
-
-# ===== 应用配置 =====
-APP_NAME=MuMuAINovel
-APP_VERSION=1.0.0
-APP_HOST=0.0.0.0
-APP_PORT=8000
-DEBUG=false
-
-# ===== LinuxDO OAuth 配置（可选）=====
-LINUXDO_CLIENT_ID=your_client_id_here
-LINUXDO_CLIENT_SECRET=your_client_secret_here
-LINUXDO_REDIRECT_URI=http://localhost:8000/api/auth/callback
-FRONTEND_URL=http://localhost:8000
-
-# ===== 本地账户登录配置 =====
-LOCAL_AUTH_ENABLED=true
-LOCAL_AUTH_USERNAME=admin
-LOCAL_AUTH_PASSWORD=your_secure_password_here
-LOCAL_AUTH_DISPLAY_NAME=管理员
-
-# 会话配置
-# 会话过期时间（分钟），默认120分钟（2小时）
-SESSION_EXPIRE_MINUTES=120
-# 会话刷新阈值（分钟），剩余时间少于此值时可刷新，默认30分钟
-SESSION_REFRESH_THRESHOLD_MINUTES=30
-
-# ===== CORS 配置（生产环境）=====
-# CORS_ORIGINS=https://your-domain.com,https://www.your-domain.com
-```
-
-### AI 模型配置
-
-项目支持多个 AI 提供商，你可以根据需要配置：
-
-| 提供商 | 推荐模型 | 用途 |
-|--------|---------|------|
-| OpenAI | gpt-4, gpt-3.5-turbo | 高质量文本生成 |
-| Anthropic | claude-3-opus, claude-3-sonnet | 长文本创作 |
-
-#### 使用中转API服务
-
-如果你无法直接访问 OpenAI 官方 API，或者想使用更经济实惠的中转服务，本项目完全支持各种 OpenAI 兼容格式的中转 API：
-
-##### 配置方法
-
-只需修改 `.env` 文件中的两个参数：
-
-```bash
-# 1. 填入中转服务提供的 API Key
-OPENAI_API_KEY=your_api_key_from_proxy_service
-
-# 2. 修改 Base URL 为中转服务的地址
-OPENAI_BASE_URL=https://your-proxy-service.com/v1
-```
-
-##### 常见中转服务配置示例
-
-**New API**
-```bash
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx
-OPENAI_BASE_URL=https://api.new-api.com/v1
-```
-
-**API2D**
-```bash
-OPENAI_API_KEY=fk-xxxxxxxxxxxxxxxx
-OPENAI_BASE_URL=https://api.api2d.com/v1
-```
-
-**OpenAI-SB**
-```bash
-OPENAI_API_KEY=sb-xxxxxxxxxxxxxxxx
-OPENAI_BASE_URL=https://api.openai-sb.com/v1
-```
-
-**自建 One API / New API**
-```bash
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx
-OPENAI_BASE_URL=https://your-domain.com/v1
-```
-
-##### 注意事项
-
-- ✅ 所有支持 OpenAI 接口格式的服务都可以使用
-- ✅ 确保中转服务的 Base URL 以 `/v1` 结尾
-- ✅ 根据中转服务支持的模型，修改 `DEFAULT_MODEL` 参数
-- ⚠️ 不同中转服务的模型名称可能不同，请参考服务商文档
-- ⚠️ 部分中转服务可能对请求频率或并发有限制
-
-##### 推荐的中转服务
-
-如果你需要中转服务，以下是一些常见选择：
-
-1. **New API** - 开源的 API 分发系统，支持多种模型
-2. **API2D** - 国内稳定的 API 中转服务
-3. **OpenAI-SB** - 提供多种 AI 模型的中转
-4. **自建服务** - 使用 One API 或 New API 自行搭建
-
-> 💡 提示：使用中转服务时，请确保服务提供商的可靠性和数据安全性
-
-### 登录方式配置
-
-#### 本地账户登录（默认启用）
-
-适合个人使用或小型团队：
-
-```bash
-LOCAL_AUTH_ENABLED=true
-LOCAL_AUTH_USERNAME=admin
-LOCAL_AUTH_PASSWORD=your_password
-```
-
-#### LinuxDO OAuth 登录
-
-适合需要社区集成的场景，需要在 [LinuxDO](https://linux.do) 注册 OAuth 应用：
-
-```bash
-LINUXDO_CLIENT_ID=your_client_id
-LINUXDO_CLIENT_SECRET=your_client_secret
-LINUXDO_REDIRECT_URI=http://your-domain:8000/api/auth/callback
+ports:
+  - "8800:8000"  # 宿主机:容器
 ```
 
 ## 📁 项目结构
 
 ```
 MuMuAINovel/
-├── backend/                    # 后端服务
+├── backend/                 # 后端服务
 │   ├── app/
-│   │   ├── api/               # API 路由
-│   │   │   ├── auth.py        # 认证接口
-│   │   │   ├── projects.py    # 项目管理
-│   │   │   ├── chapters.py    # 章节管理
-│   │   │   ├── characters.py  # 角色管理
-│   │   │   ├── wizard_stream.py # 向导流式生成
-│   │   │   └── ...
-│   │   ├── models/            # 数据模型
-│   │   ├── schemas/           # Pydantic 模型
-│   │   ├── services/          # 业务逻辑
-│   │   │   ├── ai_service.py  # AI 服务封装
-│   │   │   └── oauth_service.py # OAuth 服务
-│   │   ├── middleware/        # 中间件
-│   │   ├── utils/             # 工具函数
-│   │   ├── config.py          # 配置管理
-│   │   ├── database.py        # 数据库连接
-│   │   └── main.py            # 应用入口
-│   ├── data/                  # 数据存储目录
-│   ├── static/                # 前端静态文件（构建后）
-│   ├── requirements.txt       # Python 依赖
-│   └── .env.example           # 环境变量示例
-├── frontend/                  # 前端应用
+│   │   ├── api/            # API 路由
+│   │   ├── models/         # 数据模型
+│   │   ├── services/       # 业务逻辑
+│   │   ├── middleware/     # 中间件
+│   │   ├── database.py     # 数据库连接
+│   │   └── main.py         # 应用入口
+│   ├── scripts/            # 工具脚本
+│   └── requirements.txt    # Python 依赖
+├── frontend/               # 前端应用
 │   ├── src/
-│   │   ├── pages/            # 页面组件
-│   │   │   ├── ProjectList.tsx      # 项目列表
-│   │   │   ├── ProjectWizardNew.tsx # 创建向导
-│   │   │   ├── Chapters.tsx         # 章节管理
-│   │   │   ├── Characters.tsx       # 角色管理
-│   │   │   └── ...
-│   │   ├── components/       # 通用组件
-│   │   ├── services/         # API 服务
-│   │   ├── store/           # 状态管理（Zustand）
-│   │   ├── types/           # TypeScript 类型
-│   │   └── utils/           # 工具函数
-│   ├── package.json
-│   └── vite.config.ts
-├── docker-compose.yml         # Docker Compose 配置
-├── Dockerfile                 # Docker 镜像构建
-└── README.md                  # 项目说明文档
+│   │   ├── pages/         # 页面组件
+│   │   ├── components/    # 通用组件
+│   │   ├── services/      # API 服务
+│   │   └── store/         # 状态管理
+│   └── package.json
+├── docker-compose.yml      # Docker Compose 配置
+├── Dockerfile             # Docker 镜像构建
+└── README.md
 ```
 
 ## 🛠️ 技术栈
 
-### 后端
+**后端**: FastAPI • PostgreSQL • SQLAlchemy • OpenAI/Claude/Gemini SDK
 
-- **框架**：FastAPI 0.109.0
-- **数据库**：SQLite + SQLAlchemy（异步）
-- **AI 集成**：OpenAI、Anthropic、Google Gemini SDK
-- **认证**：LinuxDO OAuth2、本地账户
-- **日志**：Python logging + 文件轮转
-
-### 前端
-
-- **框架**：React 18.3 + TypeScript
-- **UI 库**：Ant Design 5.27
-- **路由**：React Router 6.28
-- **状态管理**：Zustand 5.0
-- **HTTP 客户端**：Axios
-- **构建工具**：Vite 7.1
+**前端**: React 18 • TypeScript • Ant Design • Zustand • Vite
 
 ## 📖 使用指南
 
-### 创建第一个小说项目
-
-1. **登录系统**
-   - 使用本地账户或 LinuxDO 账户登录
-
-2. **创建项目**
-   - 点击"创建项目"按钮
-   - 选择"使用向导创建"或"手动创建"
-
-3. **使用向导（推荐）**
-   - 输入小说基本信息（标题、类型、背景等）
-   - AI 自动生成大纲、角色和世界观
-   - 实时查看生成进度
-
-4. **编辑和完善**
-   - 在项目详情页查看和编辑大纲
-   - 管理角色和人物关系
-   - 生成和编辑章节内容
-
+1. **登录系统** - 使用本地账户或 LinuxDO 账户
+2. **创建项目** - 选择"使用向导创建"
+3. **AI 生成** - 输入基本信息，AI 自动生成大纲和角色
+4. **编辑完善** - 管理角色关系，生成和编辑章节
 
 ### API 文档
 
-应用启动后，可访问自动生成的 API 文档：
-
-- Swagger UI：`http://localhost:8000/docs`
-- ReDoc：`http://localhost:8000/redoc`
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
 
 ## 🤝 贡献
 
@@ -491,38 +322,32 @@ MuMuAINovel/
 
 ## 📝 许可证
 
-本项目采用 [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html) 开源协议
+本项目采用 [GNU General Public License v3.0](LICENSE)
 
-**这意味着：**
-
-- ✅ **可以** - 自由使用、复制、修改和分发本项目
-- ✅ **可以** - 用于商业目的
-- ✅ **可以** - 用于个人学习和研究
-- 📝 **必须** - 开源你的修改版本
-- 📝 **必须** - 保留原作者版权声明
-- 📝 **必须** - 以相同的 GPL v3 协议发布衍生作品
-
-详见 [LICENSE](LICENSE) 文件
+**GPL v3 意味着：**
+- ✅ 可自由使用、修改和分发
+- ✅ 可用于商业目的
+- 📝 必须开源修改版本
+- 📝 必须保留原作者版权
+- 📝 衍生作品必须使用 GPL v3 协议
 
 ## 🙏 致谢
 
-- [FastAPI](https://fastapi.tiangolo.com/) - 现代化的 Python Web 框架
-- [React](https://react.dev/) - 用户界面构建库
-- [Ant Design](https://ant.design/) - 企业级 UI 设计语言
-- [OpenAI](https://openai.com/) / [Anthropic](https://www.anthropic.com/) - AI 模型提供商
+- [FastAPI](https://fastapi.tiangolo.com/) - Python Web 框架
+- [React](https://react.dev/) - 前端框架
+- [Ant Design](https://ant.design/) - UI 组件库
+- [PostgreSQL](https://www.postgresql.org/) - 数据库
 
 ## 📧 联系方式
 
-如有问题或建议，欢迎通过以下方式联系：
-
-- 提交 [Issue](https://github.com/yourusername/MuMuAINovel/issues)
-- Linux DO [LD](https://linux.do/t/topic/1100112)
+- 提交 [Issue](https://github.com/xiamuceer-j/MuMuAINovel/issues)
+- Linux DO [讨论](https://linux.do/t/topic/1106333)
 
 ---
 
 <div align="center">
 
-**如果这个项目对你有帮助，请给个 ⭐️ Star 支持一下！**
+**如果这个项目对你有帮助，请给个 ⭐️ Star！**
 
 Made with ❤️
 

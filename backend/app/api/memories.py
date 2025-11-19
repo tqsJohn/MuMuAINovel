@@ -6,6 +6,7 @@ from typing import List, Optional
 from app.database import get_db
 from app.models.memory import StoryMemory, PlotAnalysis
 from app.models.chapter import Chapter
+from app.models.project import Project
 from app.services.memory_service import memory_service
 from app.services.plot_analyzer import get_plot_analyzer
 from app.services.ai_service import create_user_ai_service
@@ -15,6 +16,26 @@ import uuid
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/memories", tags=["memories"])
+
+
+async def verify_project_access(project_id: str, user_id: str, db: AsyncSession) -> Project:
+    """验证用户是否有权访问指定项目"""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="未登录")
+    
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.user_id == user_id
+        )
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        logger.warning(f"项目访问被拒绝: project_id={project_id}, user_id={user_id}")
+        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
+    
+    return project
 
 
 @router.post("/projects/{project_id}/analyze-chapter/{chapter_id}")
@@ -30,7 +51,10 @@ async def analyze_chapter(
     对指定章节进行剧情分析,提取钩子、伏笔、情节点等,并存入记忆系统
     """
     try:
-        user_id = request.state.user_id
+        user_id = getattr(request.state, 'user_id', None)
+        
+        # 验证用户权限
+        await verify_project_access(project_id, user_id, db)
         
         # 获取章节内容
         result = await db.execute(
@@ -192,7 +216,10 @@ async def get_project_memories(
 ):
     """获取项目的记忆列表"""
     try:
-        user_id = request.state.user_id
+        user_id = getattr(request.state, 'user_id', None)
+        
+        # 验证用户权限
+        await verify_project_access(project_id, user_id, db)
         
         # 构建查询
         query = select(StoryMemory).where(StoryMemory.project_id == project_id)
@@ -222,10 +249,16 @@ async def get_project_memories(
 async def get_chapter_analysis(
     project_id: str,
     chapter_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """获取章节的剧情分析"""
     try:
+        user_id = getattr(request.state, 'user_id', None)
+        
+        # 验证用户权限
+        await verify_project_access(project_id, user_id, db)
+        
         result = await db.execute(
             select(PlotAnalysis).where(
                 and_(
@@ -258,11 +291,15 @@ async def search_memories(
     query: str,
     memory_types: Optional[List[str]] = None,
     limit: int = 10,
-    min_importance: float = 0.0
+    min_importance: float = 0.0,
+    db: AsyncSession = Depends(get_db)
 ):
     """语义搜索项目记忆"""
     try:
-        user_id = request.state.user_id
+        user_id = getattr(request.state, 'user_id', None)
+        
+        # 验证用户权限
+        await verify_project_access(project_id, user_id, db)
         
         memories = await memory_service.search_memories(
             user_id=user_id,
@@ -294,7 +331,10 @@ async def get_unresolved_foreshadows(
 ):
     """获取未完结的伏笔"""
     try:
-        user_id = request.state.user_id
+        user_id = getattr(request.state, 'user_id', None)
+        
+        # 验证用户权限
+        await verify_project_access(project_id, user_id, db)
         
         # 从向量库搜索
         foreshadows = await memory_service.find_unresolved_foreshadows(
@@ -317,11 +357,15 @@ async def get_unresolved_foreshadows(
 @router.get("/projects/{project_id}/stats")
 async def get_memory_stats(
     project_id: str,
-    request: Request
+    request: Request,
+    db: AsyncSession = Depends(get_db)
 ):
     """获取记忆统计信息"""
     try:
-        user_id = request.state.user_id
+        user_id = getattr(request.state, 'user_id', None)
+        
+        # 验证用户权限
+        await verify_project_access(project_id, user_id, db)
         
         stats = await memory_service.get_memory_stats(
             user_id=user_id,
@@ -347,7 +391,10 @@ async def delete_chapter_memories(
 ):
     """删除章节的所有记忆"""
     try:
-        user_id = request.state.user_id
+        user_id = getattr(request.state, 'user_id', None)
+        
+        # 验证用户权限
+        await verify_project_access(project_id, user_id, db)
         
         # 从数据库删除
         result = await db.execute(

@@ -10,9 +10,12 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
-  ReloadOutlined
+  ReloadOutlined,
+  EditOutlined
 } from '@ant-design/icons';
 import type { AnalysisTask, ChapterAnalysisResponse } from '../types';
+import ChapterRegenerationModal from './ChapterRegenerationModal';
+import ChapterContentComparison from './ChapterContentComparison';
 
 // 判断是否为移动设备
 const isMobileDevice = () => window.innerWidth < 768;
@@ -29,6 +32,11 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(isMobileDevice());
+  const [regenerationModalVisible, setRegenerationModalVisible] = useState(false);
+  const [comparisonModalVisible, setComparisonModalVisible] = useState(false);
+  const [chapterInfo, setChapterInfo] = useState<{ title: string; chapter_number: number; content: string } | null>(null);
+  const [newGeneratedContent, setNewGeneratedContent] = useState('');
+  const [newContentWordCount, setNewContentWordCount] = useState(0);
 
   useEffect(() => {
     if (visible && chapterId) {
@@ -54,6 +62,17 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
       setLoading(true);
       setError(null);
       
+      // 同时获取章节信息
+      const chapterResponse = await fetch(`/api/chapters/${chapterId}`);
+      if (chapterResponse.ok) {
+        const chapterData = await chapterResponse.json();
+        setChapterInfo({
+          title: chapterData.title,
+          chapter_number: chapterData.chapter_number,
+          content: chapterData.content || ''
+        });
+      }
+      
       const response = await fetch(`/api/chapters/${chapterId}/analysis/status`);
       
       if (response.status === 404) {
@@ -67,6 +86,14 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
       }
       
       const taskData: AnalysisTask = await response.json();
+      
+      // 如果状态为 none（无任务），设置 task 为 null，让前端显示"开始分析"按钮
+      if (taskData.status === 'none' || !taskData.has_task) {
+        setTask(null);
+        setError(null); // 清除错误，这不是错误状态
+        return;
+      }
+      
       setTask(taskData);
       
       if (taskData.status === 'completed') {
@@ -191,6 +218,17 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
     );
   };
 
+  // 将分析建议转换为重新生成组件需要的格式
+  const convertSuggestionsForRegeneration = () => {
+    if (!analysis?.analysis?.suggestions) return [];
+    
+    return analysis.analysis.suggestions.map((suggestion, index) => ({
+      category: '改进建议',
+      content: suggestion,
+      priority: index < 3 ? 'high' : 'medium'
+    }));
+  };
+
   const renderAnalysisResult = () => {
     if (!analysis) return null;
     
@@ -207,6 +245,29 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
             icon: <TrophyOutlined />,
             children: (
               <div style={{ height: isMobile ? 'calc(80vh - 180px)' : 'calc(90vh - 220px)', overflowY: 'auto', paddingRight: '8px' }}>
+                {/* 根据建议重新生成按钮 */}
+                {analysis_data.suggestions && analysis_data.suggestions.length > 0 && (
+                  <Alert
+                    message="发现改进建议"
+                    description={
+                      <div>
+                        <p style={{ marginBottom: 12 }}>AI已分析出 {analysis_data.suggestions.length} 条改进建议，您可以根据这些建议重新生成章节内容。</p>
+                        <Button
+                          type="primary"
+                          icon={<EditOutlined />}
+                          onClick={() => setRegenerationModalVisible(true)}
+                          size={isMobile ? 'small' : 'middle'}
+                        >
+                          根据建议重新生成
+                        </Button>
+                      </div>
+                    }
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                  />
+                )}
+                
                 <Card title="整体评分" style={{ marginBottom: 16 }} size={isMobile ? 'small' : 'default'}>
                   <Row gutter={isMobile ? 8 : 16}>
                     <Col span={isMobile ? 12 : 6}>
@@ -552,6 +613,50 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
       
       {task && task.status !== 'completed' && renderProgress()}
       {task && task.status === 'completed' && analysis && renderAnalysisResult()}
+      
+      {/* 重新生成Modal */}
+      {chapterInfo && (
+        <ChapterRegenerationModal
+          visible={regenerationModalVisible}
+          onCancel={() => setRegenerationModalVisible(false)}
+          onSuccess={(newContent: string, wordCount: number) => {
+            // 保存新生成的内容
+            setNewGeneratedContent(newContent);
+            setNewContentWordCount(wordCount);
+            // 关闭重新生成对话框
+            setRegenerationModalVisible(false);
+            // 打开对比界面
+            setComparisonModalVisible(true);
+          }}
+          chapterId={chapterId}
+          chapterTitle={chapterInfo.title}
+          chapterNumber={chapterInfo.chapter_number}
+          suggestions={convertSuggestionsForRegeneration()}
+          hasAnalysis={true}
+        />
+      )}
+      
+      {/* 内容对比组件 */}
+      {chapterInfo && comparisonModalVisible && (
+        <ChapterContentComparison
+          visible={comparisonModalVisible}
+          onClose={() => setComparisonModalVisible(false)}
+          chapterId={chapterId}
+          chapterTitle={chapterInfo.title}
+          originalContent={chapterInfo.content}
+          newContent={newGeneratedContent}
+          wordCount={newContentWordCount}
+          onApply={() => {
+            // 应用新内容后刷新章节信息
+            fetchAnalysisStatus();
+          }}
+          onDiscard={() => {
+            // 放弃新内容，清空状态
+            setNewGeneratedContent('');
+            setNewContentWordCount(0);
+          }}
+        />
+      )}
     </Modal>
   );
 }

@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 from app.user_manager import user_manager, User
+from app.user_password import password_manager
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
 
@@ -27,6 +28,11 @@ def require_admin(request: Request):
 class SetAdminRequest(BaseModel):
     user_id: str
     is_admin: bool
+
+
+class ResetPasswordRequest(BaseModel):
+    user_id: str
+    new_password: Optional[str] = None  # 如果为空则使用默认密码
 
 
 @router.get("/current")
@@ -123,3 +129,61 @@ async def get_user(
         raise HTTPException(status_code=404, detail="用户不存在")
     
     return user.dict()
+
+
+@router.post("/reset-password")
+async def reset_user_password(
+    data: ResetPasswordRequest,
+    admin_user: User = Depends(require_admin)
+):
+    """
+    重置用户密码（仅管理员）
+    
+    如果提供了 new_password，则设置为指定密码
+    如果未提供 new_password，则重置为默认密码（username@666）
+    
+    限制：
+    - 不能重置自己的密码（应该使用修改密码功能）
+    """
+    # 检查是否尝试重置自己的密码
+    if data.user_id == admin_user.user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="不能重置自己的密码，请使用修改密码功能"
+        )
+    
+    # 检查目标用户是否存在
+    target_user = await user_manager.get_user(data.user_id)
+    if not target_user:
+        raise HTTPException(
+            status_code=404,
+            detail="目标用户不存在"
+        )
+    
+    # 重置密码
+    try:
+        actual_password = await password_manager.set_password(
+            target_user.user_id,
+            target_user.username,
+            data.new_password
+        )
+        
+        # 如果使用了默认密码，返回密码供管理员告知用户
+        message = "密码重置成功"
+        response_data = {
+            "message": message,
+            "user_id": data.user_id,
+            "username": target_user.username
+        }
+        
+        if not data.new_password:
+            response_data["default_password"] = actual_password
+            response_data["message"] = f"密码已重置为默认密码: {actual_password}"
+        
+        return response_data
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"重置密码失败: {str(e)}"
+        )

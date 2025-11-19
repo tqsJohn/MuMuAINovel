@@ -1,5 +1,5 @@
 """关系管理API"""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_
 from typing import List, Optional
@@ -12,6 +12,7 @@ from app.models.relationship import (
     OrganizationMember
 )
 from app.models.character import Character
+from app.models.project import Project
 from app.schemas.relationship import (
     RelationshipTypeResponse,
     CharacterRelationshipCreate,
@@ -27,6 +28,26 @@ router = APIRouter(prefix="/relationships", tags=["关系管理"])
 logger = get_logger(__name__)
 
 
+async def verify_project_access(project_id: str, user_id: str, db: AsyncSession) -> Project:
+    """验证用户是否有权访问指定项目"""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="未登录")
+    
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.user_id == user_id
+        )
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        logger.warning(f"项目访问被拒绝: project_id={project_id}, user_id={user_id}")
+        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
+    
+    return project
+
+
 @router.get("/types", response_model=List[RelationshipTypeResponse], summary="获取关系类型列表")
 async def get_relationship_types(db: AsyncSession = Depends(get_db)):
     """获取所有预定义的关系类型"""
@@ -38,9 +59,14 @@ async def get_relationship_types(db: AsyncSession = Depends(get_db)):
 @router.get("/project/{project_id}", response_model=List[CharacterRelationshipResponse], summary="获取项目的所有关系")
 async def get_project_relationships(
     project_id: str,
+    request: Request,
     character_id: Optional[str] = Query(None, description="筛选特定角色的关系"),
     db: AsyncSession = Depends(get_db)
 ):
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(project_id, user_id, db)
+    
     """
     获取项目中的所有角色关系
     
@@ -70,8 +96,13 @@ async def get_project_relationships(
 @router.get("/graph/{project_id}", response_model=RelationshipGraphData, summary="获取关系图谱数据")
 async def get_relationship_graph(
     project_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(project_id, user_id, db)
+    
     """
     获取用于可视化的关系图谱数据
     
@@ -122,6 +153,7 @@ async def get_relationship_graph(
 @router.post("/", response_model=CharacterRelationshipResponse, summary="创建角色关系")
 async def create_relationship(
     relationship: CharacterRelationshipCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -131,6 +163,10 @@ async def create_relationship(
     - 可以指定预定义的关系类型或自定义关系名称
     - 可以设置亲密度、状态等属性
     """
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(relationship.project_id, user_id, db)
+    
     # 验证角色是否存在
     char_from = await db.execute(
         select(Character).where(Character.id == relationship.character_from_id)
@@ -161,6 +197,7 @@ async def create_relationship(
 async def update_relationship(
     relationship_id: str,
     relationship: CharacterRelationshipUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """更新角色关系的属性（亲密度、状态等）"""
@@ -173,6 +210,10 @@ async def update_relationship(
     
     if not db_rel:
         raise HTTPException(status_code=404, detail="关系不存在")
+    
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(db_rel.project_id, user_id, db)
     
     # 更新字段
     update_data = relationship.model_dump(exclude_unset=True)
@@ -189,6 +230,7 @@ async def update_relationship(
 @router.delete("/{relationship_id}", summary="删除关系")
 async def delete_relationship(
     relationship_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """删除角色关系"""
@@ -201,6 +243,10 @@ async def delete_relationship(
     
     if not db_rel:
         raise HTTPException(status_code=404, detail="关系不存在")
+    
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(db_rel.project_id, user_id, db)
     
     await db.delete(db_rel)
     await db.commit()

@@ -112,42 +112,49 @@ class PromptService:
     """提示词模板管理"""
     
     # 世界构建提示词
-    WORLD_BUILDING = """你是一位资深的世界观设计师。请根据以下信息构建一个完整的小说世界观：
+    WORLD_BUILDING = """你是一位资深的世界观设计师（World-Building Architect）。你的任务是基于输入信息，构建一个高度原创、深度自洽、且充满戏剧冲突的小说世界观。
 
+# 1. 输入信息
 书名：{title}
 主题：{theme}
 类型：{genre}
 
-请生成包含以下内容的世界构建框架：
+# 2. 世界构建框架
+请生成包含以下四个核心板块的世界构建框架。请确保所有板块都围绕【核心概念】展开，并且板块之间【互为因果】。
 
-1. **时间背景**：具体的时代设定、时间流逝特点、重要历史事件
-2. **地理位置**：主要地点描述、地理环境特征、空间布局
-3. **氛围基调**：整体氛围感觉、情感色彩、视觉风格
-4. **世界规则**：基本运行法则、特殊设定、社会规则和禁忌、权力结构
+1.  **时间背景 (time_period)**：
+    * 具体的时代设定（例如：星际航行晚期、黑铁时代）。
+    * 重要的【历史转折事件】（是什么导致了当前的世界面貌？）。
+    * 当前的主要【社会矛盾】或【时代议题】。
+2.  **地理/空间 (location)**：
+    * 主要舞台（如城市、星球、位面）的【地理环境特征】。
+    * 这些特征如何影响了【文明】的形态和【资源】分布？
+    * 独特的【空间布局】或【奇观】。
+3.  **氛围基调 (atmosphere)**：
+    * 整体的【情感色彩】（例如：压抑、荒诞、史诗、诡异）。
+    * 【视觉风格】（例如：赛博霓虹、蒸汽朋克、哥特式）。
+    * 普通居民在日常生活中最常【感受】到什么？
+4.  **世界规则 (rules)**：
+    * 【物理法则】或【超自然力量】（如魔法、科技）的【具体运作方式】和【代价】。
+    * 【社会规则】和【权力结构】（谁在统治？基于什么？）。
+    * 最严重的【社会禁忌】是什么？违反了会怎样？
 
-要求：
-- 与主题高度契合
-- 设定要合理自洽
-- 为故事发展提供支撑
-- 具有独特性和吸引力
+# 3. 严格格式要求
+1.  **绝对纯净JSON**：你的[唯一]输出必须是一个完整的JSON对象。输出必须以左花括号开始，并以右花括号结束。
+2.  **禁止额外字符**：不要在JSON对象之前或之后包含任何说明文字、Markdown标记（如三个反引号加json）、注释或任何其他非JSON字符。
+3.  **JSON内部文本规则**：在JSON的value字符串内部：
+    * 严禁使用任何中文引号（""''）或英文引号来表示强调或引用。
+    * 所有【专有名词】（如地点、人物、组织）应使用【】包裹。
+    * 所有《作品》或《特殊概念》的标题应使用《》包裹。
+4.  **JSON结构**：严格遵守`"key": "value"`的英文双引号结构，并使用下面指定的key。
+5.  **内容密度**：每个字段的描述都必须【深入且详实】，提供至少5-7个具体的设定点或细节。
 
-**重要格式要求：**
-1. 只返回纯JSON格式，不要包含任何markdown标记、代码块标记或其他说明文字
-2. 不要在JSON字符串值中使用中文引号（""''），请使用英文引号或直接省略引号
-3. 专有名词和强调内容可以使用【】或《》标记，不要用引号
-
-请严格按照以下JSON格式返回（每个字段为200-300字的文本描述）：
 {{
-  "time_period": "时间背景的详细描述，包括时代设定、时间特点、历史事件",
-  "location": "地理位置的详细描述，包括主要地点、环境特征、空间布局",
-  "atmosphere": "氛围基调的详细描述，包括整体氛围、情感色彩、视觉风格",
-  "rules": "世界规则的详细描述，包括运行法则、特殊设定、社会规则、权力结构"
-}}
-
-再次强调：
-1. 只返回纯JSON对象，不要有```json```这样的标记
-2. 文本中不要使用中文引号（""），使用【】或《》代替
-3. 不要有任何额外的文字说明"""
+  "time_period": "（此处填写时间背景的详细描述）",
+  "location": "（此处填写地理/空间的详细描述）",
+  "atmosphere": "（此处填写氛围基调的详细描述）",
+  "rules": "（此处填写世界规则的详细描述）"
+}}"""
 
     # 批量角色生成提示词
     CHARACTERS_BATCH_GENERATION = """你是一位专业的角色设定师。请根据以下世界观和要求，生成{count}个立体丰满的角色和组织：
@@ -248,7 +255,7 @@ class PromptService:
 2. **关系约束**：relationships_array只能引用本批次中已经出现的角色名称
 3. **组织约束**：organization_memberships只能引用本批次中is_organization=true的实体名称
 4. **禁止幻觉**：不要引用任何不存在的角色或组织，如果没有可引用的就留空数组[]
-5. intimacy_level和loyalty都是0-100的整数
+5. intimacy_level是-100到100的整数（负值表示敌对仇恨关系），loyalty是0-100的整数
 6. 角色之间要形成合理的关系网络
 
 **示例说明**：
@@ -682,7 +689,7 @@ class PromptService:
 **重要说明：**
 1. relationships数组：只包含与上面列出的已存在角色的关系，通过target_character_name匹配
 2. organization_memberships数组：只包含与上面列出的已存在组织的关系
-3. intimacy_level和loyalty都是0-100的整数
+3. intimacy_level是-100到100的整数（负值表示敌对、仇恨等关系），loyalty是0-100的整数
 4. 如果没有关系或组织，对应数组为空[]
 5. relationships_text是自然语言描述，用于展示给用户看
 
@@ -782,6 +789,81 @@ class PromptService:
 1. 只返回纯JSON对象，不要有```json```这样的标记
 2. 文本中不要使用中文引号（""），改用【】或《》
 3. 不要有任何额外的文字说明"""
+    
+    # 大纲展开为多章节的提示词
+    OUTLINE_EXPANSION = """你是专业的小说情节架构师。请分析以下大纲节点，将其展开为 {target_chapters} 个章节的详细规划。
+
+【项目信息】
+小说名称：{title}
+类型：{genre}
+主题：{theme}
+叙事视角：{narrative_perspective}
+
+【世界观背景】
+时间背景：{time_period}
+地理位置：{location}
+氛围基调：{atmosphere}
+世界规则：{rules}
+
+【角色信息】
+{characters_info}
+
+【大纲节点】
+序号：第 {outline_order} 节
+标题：{outline_title}
+内容：{outline_content}
+
+【上下文】
+{context_info}
+
+【展开策略】
+{strategy_instruction}
+
+【任务要求】
+1. 深度分析该大纲的剧情容量和叙事节奏
+2. 识别关键剧情点、冲突点和情感转折点
+3. 将大纲拆解为 {target_chapters} 个章节，每章需包含：
+   - sub_index: 子章节序号（1, 2, 3...）
+   - title: 章节标题（体现该章核心冲突或情感）
+   - plot_summary: 剧情摘要（200-300字，详细描述该章发生的事件）
+   - key_events: 关键事件列表（3-5个关键剧情点）
+   - character_focus: 角色焦点（主要涉及的角色名称）
+   - emotional_tone: 情感基调（如：紧张、温馨、悲伤、激动等）
+   - narrative_goal: 叙事目标（该章要达成的叙事效果）
+   - conflict_type: 冲突类型（如：内心挣扎、人际冲突、环境挑战等）
+   - estimated_words: 预计字数（建议2000-5000字）
+{scene_instruction}
+4. 确保章节间：
+   - 衔接自然流畅
+   - 剧情递进合理
+   - 节奏张弛有度
+   - 每章都有明确的叙事价值
+
+**重要格式要求：**
+1. 只返回纯JSON数组格式，不要包含任何markdown标记、代码块标记或其他说明文字
+2. 不要在JSON字符串值中使用中文引号（""''），请使用【】或《》
+3. 文本描述中的专有名词使用【】标记
+
+请严格按照以下JSON数组格式输出：
+[
+  {{
+    "sub_index": 1,
+    "title": "章节标题",
+    "plot_summary": "该章详细剧情摘要（200-300字）...",
+    "key_events": ["关键事件1", "关键事件2", "关键事件3"],
+    "character_focus": ["角色A", "角色B"],
+    "emotional_tone": "情感基调",
+    "narrative_goal": "叙事目标",
+    "conflict_type": "冲突类型",
+    "estimated_words": 3000{scene_field}
+  }}
+]
+
+再次强调：
+1. 只返回纯JSON数组，不要有```json```这样的标记
+2. 数组中要包含{target_chapters}个章节对象
+3. 每个plot_summary必须是200-300字的详细描述
+4. 文本中不要使用中文引号（""），改用【】或《》"""
 
     @staticmethod
     def format_prompt(template: str, **kwargs) -> str:
@@ -1098,6 +1180,72 @@ class PromptService:
             cls.SINGLE_ORGANIZATION_GENERATION,
             project_context=project_context,
             user_input=user_input
+        )
+    
+    @classmethod
+    def get_outline_expansion_prompt(cls, title: str, genre: str, theme: str,
+                                    narrative_perspective: str, time_period: str,
+                                    location: str, atmosphere: str, rules: str,
+                                    characters_info: str, outline_order: int,
+                                    outline_title: str, outline_content: str,
+                                    context_info: str, strategy: str = "balanced",
+                                    target_chapters: int = 3,
+                                    include_scenes: bool = False) -> str:
+        """
+        获取大纲展开为多章节的提示词
+        
+        Args:
+            title: 小说名称
+            genre: 类型
+            theme: 主题
+            narrative_perspective: 叙事视角
+            time_period: 时间背景
+            location: 地理位置
+            atmosphere: 氛围基调
+            rules: 世界规则
+            characters_info: 角色信息
+            outline_order: 大纲序号
+            outline_title: 大纲标题
+            outline_content: 大纲内容
+            context_info: 上下文信息
+            strategy: 展开策略 (balanced/climax/detail)
+            target_chapters: 目标章节数
+            include_scenes: 是否包含场景字段
+        """
+        # 根据策略生成指导说明
+        strategy_instructions = {
+            "balanced": "采用均衡策略：将大纲内容平均分配到各章节，保持节奏均匀，每章剧情密度相当。",
+            "climax": "采用高潮重点策略：识别大纲中的高潮部分，为其分配更多章节进行细致展开，其他部分适当精简。",
+            "detail": "采用细节丰富策略：深挖大纲中的每个细节，为每个关键事件、情感转折都安排足够的叙事空间。"
+        }
+        strategy_instruction = strategy_instructions.get(strategy, strategy_instructions["balanced"])
+        
+        # 场景相关的指令和字段
+        scene_instruction = ""
+        scene_field = ""
+        if include_scenes:
+            scene_instruction = "\n   - scenes: 场景列表（2-4个具体场景描述）"
+            scene_field = ',\n    "scenes": ["场景1", "场景2"]'
+        
+        return cls.format_prompt(
+            cls.OUTLINE_EXPANSION,
+            title=title,
+            genre=genre,
+            theme=theme,
+            narrative_perspective=narrative_perspective,
+            time_period=time_period,
+            location=location,
+            atmosphere=atmosphere,
+            rules=rules,
+            characters_info=characters_info,
+            outline_order=outline_order,
+            outline_title=outline_title,
+            outline_content=outline_content,
+            context_info=context_info,
+            strategy_instruction=strategy_instruction,
+            target_chapters=target_chapters,
+            scene_instruction=scene_instruction,
+            scene_field=scene_field
         )
 
 

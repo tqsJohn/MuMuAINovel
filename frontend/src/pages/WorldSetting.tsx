@@ -1,12 +1,18 @@
-import { Card, Descriptions, Empty, Typography } from 'antd';
-import { GlobalOutlined } from '@ant-design/icons';
+import { Card, Descriptions, Empty, Typography, Button, Modal, Form, Input, message } from 'antd';
+import { GlobalOutlined, EditOutlined } from '@ant-design/icons';
+import { useState } from 'react';
 import { useStore } from '../store';
 import { cardStyles } from '../components/CardStyles';
+import { projectApi } from '../services/api';
 
 const { Title, Paragraph } = Typography;
+const { TextArea } = Input;
 
 export default function WorldSetting() {
-  const { currentProject } = useStore();
+  const { currentProject, setCurrentProject } = useStore();
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [editForm] = Form.useForm();
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!currentProject) return null;
 
@@ -62,10 +68,28 @@ export default function WorldSetting() {
         marginBottom: 24,
         borderBottom: '1px solid #f0f0f0',
         display: 'flex',
-        alignItems: 'center'
+        alignItems: 'center',
+        justifyContent: 'space-between'
       }}>
-        <GlobalOutlined style={{ fontSize: 24, marginRight: 12, color: '#1890ff' }} />
-        <h2 style={{ margin: 0 }}>世界设定</h2>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <GlobalOutlined style={{ fontSize: 24, marginRight: 12, color: '#1890ff' }} />
+          <h2 style={{ margin: 0 }}>世界设定</h2>
+        </div>
+        <Button
+          type="primary"
+          icon={<EditOutlined />}
+          onClick={() => {
+            editForm.setFieldsValue({
+              world_time_period: currentProject.world_time_period || '',
+              world_location: currentProject.world_location || '',
+              world_atmosphere: currentProject.world_atmosphere || '',
+              world_rules: currentProject.world_rules || '',
+            });
+            setIsEditModalVisible(true);
+          }}
+        >
+          编辑世界观
+        </Button>
       </div>
 
       {/* 可滚动内容区域 */}
@@ -182,6 +206,102 @@ export default function WorldSetting() {
         </div>
       </Card>
       </div>
+
+      {/* 编辑世界观模态框 */}
+      <Modal
+        title="编辑世界观"
+        open={isEditModalVisible}
+        centered
+        onCancel={() => {
+          setIsEditModalVisible(false);
+          editForm.resetFields();
+        }}
+        onOk={async () => {
+          try {
+            const values = await editForm.validateFields();
+            setIsSaving(true);
+
+            const updatedProject = await projectApi.updateProject(currentProject.id, {
+              world_time_period: values.world_time_period,
+              world_location: values.world_location,
+              world_atmosphere: values.world_atmosphere,
+              world_rules: values.world_rules,
+            });
+
+            setCurrentProject(updatedProject);
+            message.success('世界观更新成功');
+            setIsEditModalVisible(false);
+            editForm.resetFields();
+          } catch (error) {
+            console.error('更新世界观失败:', error);
+            message.error('更新失败，请重试');
+          } finally {
+            setIsSaving(false);
+          }
+        }}
+        confirmLoading={isSaving}
+        width={800}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form
+          form={editForm}
+          layout="vertical"
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            label="时间设定"
+            name="world_time_period"
+            rules={[{ required: true, message: '请输入时间设定' }]}
+          >
+            <TextArea
+              rows={4}
+              placeholder="描述故事发生的时代背景..."
+              showCount
+              maxLength={1000}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="地点设定"
+            name="world_location"
+            rules={[{ required: true, message: '请输入地点设定' }]}
+          >
+            <TextArea
+              rows={4}
+              placeholder="描述故事发生的地理位置和环境..."
+              showCount
+              maxLength={1000}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="氛围设定"
+            name="world_atmosphere"
+            rules={[{ required: true, message: '请输入氛围设定' }]}
+          >
+            <TextArea
+              rows={4}
+              placeholder="描述故事的整体氛围和基调..."
+              showCount
+              maxLength={1000}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="规则设定"
+            name="world_rules"
+            rules={[{ required: true, message: '请输入规则设定' }]}
+          >
+            <TextArea
+              rows={4}
+              placeholder="描述这个世界的特殊规则和设定..."
+              showCount
+              maxLength={1000}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }
