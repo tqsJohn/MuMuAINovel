@@ -5,11 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 项目概述
 
 MuMuAINovel 是一个基于 AI 的智能小说创作助手，采用前后端分离架构：
-- **后端**：FastAPI + SQLAlchemy (异步) + SQLite (每用户独立数据库)
+- **后端**：FastAPI + SQLAlchemy (异步) + PostgreSQL (通过 user_id 字段隔离)
 - **前端**：React 18 + TypeScript + Ant Design + Zustand
-- **AI集成**：OpenAI、Anthropic Claude、支持中转 API
+- **AI集成**：OpenAI、Anthropic Claude、Gemini，支持中转 API
 
-核心功能：向导式小说项目创建、AI 生成大纲/角色/世界观、章节编辑与润色、RAG 记忆系统、写作风格管理。
+核心功能：向导式/灵感模式项目创建、AI 生成大纲/角色/世界观、章节编辑与润色、RAG 记忆系统、写作风格管理、MCP 工具增强。
 
 ## 开发环境设置
 
@@ -20,7 +20,16 @@ MuMuAINovel 是一个基于 AI 的智能小说创作助手，采用前后端分�
 cd backend
 python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env  # 编辑 .env 配置至少一个 AI 服务的 API Key
+cp .env.example .env  # 编辑 .env 配置数据库连接和 AI API Key
+
+# 启动 PostgreSQL（本地开发）
+docker run -d --name postgres \
+  -e POSTGRES_PASSWORD=your_password \
+  -e POSTGRES_DB=mumuai_novel \
+  -p 5432:5432 \
+  postgres:18-alpine
+
+# 启动后端
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -55,6 +64,7 @@ app/
 │   ├── auth.py          # 认证（LinuxDO OAuth + 本地账户）
 │   ├── projects.py      # 项目 CRUD
 │   ├── wizard_stream.py # ⭐ SSE 流式向导生成
+│   ├── inspiration.py   # 灵感模式 - 对话式项目创建
 │   ├── chapters.py      # 章节生成、编辑、润色
 │   ├── characters.py    # 角色管理
 │   ├── outlines.py      # 大纲管理
@@ -104,28 +114,36 @@ src/
 
 ### 1. 多用户数据库隔离 (database.py)
 
-**核心机制**：每个用户独立的 SQLite 文件
+**核心机制**：PostgreSQL 共享数据库 + user_id 字段隔离
 ```python
-# 数据库文件: data/ai_story_user_{user_id}.db
-# 引擎缓存: _engine_cache 字典，按 user_id 索引
-# 双重锁保护:
-#   - _cache_lock: 保护引擎锁字典创建
-#   - _engine_locks[user_id]: 每用户独立锁，防止并发创建
+# 架构变更：从 SQLite 迁移到 PostgreSQL
+# - 所有用户共享同一个 PostgreSQL 数据库
+# - 通过模型中的 user_id 字段隔离数据
+# - 共享引擎缓存，减少连接开销
 ```
 
-**SQLite 性能优化**（自动应用）：
+**PostgreSQL 连接池优化**（自动应用）：
 ```python
-PRAGMA journal_mode=WAL        # Write-Ahead Log 模式，提升并发性能
-PRAGMA synchronous=NORMAL      # 平衡性能与数据安全
-PRAGMA cache_size=-64000       # 64MB 内存缓存
-PRAGMA temp_store=MEMORY       # 临时表存储在内存
-PRAGMA busy_timeout=5000       # 5秒锁等待超时
+pool_size=30                   # 核心连接数
+max_overflow=20                # 溢出连接数（总共 50 连接）
+pool_timeout=60                # 连接超时 60 秒
+pool_recycle=1800              # 连接回收 1800 秒
+pool_use_lifo=True             # LIFO 策略提高连接复用率
+pool_pre_ping=True             # 连接前检测可用性
+
+# 服务器优化
+jit=off                        # 关闭 JIT 提高短查询性能
+statement_cache_size=500       # 启用语句缓存
+command_timeout=60             # 命令超时
 ```
+
+**预估性能**：支持 80-150 并发用户
 
 **工作流程**：
 1. `AuthMiddleware` 从 Cookie 提取 `user_id` → `request.state.user_id`
-2. API 依赖 `get_db(request)` → 根据 `user_id` 获取用户专属引擎
-3. 引擎缓存避免重复创建，首次创建时自动初始化数据库表
+2. API 依赖 `get_db(request)` → 获取共享 PostgreSQL 引擎的会话
+3. 所有数据库查询自动通过 `user_id` 过滤（在模型层实现）
+4. 首次启动时自动运行 `init_postgres.sql` 初始化扩展和表
 
 **会话统计监控**：
 ```bash
@@ -311,7 +329,29 @@ request.state.user = user
 request.state.is_admin = user.is_admin
 ```
 
-### 8. 写作风格管理
+### 8. 灵感模式 (inspiration.py)
+
+**功能定位**：对话式项目创建流程，降低创作门槛
+
+**核心流程**（6步对话）：
+```python
+1. initial_idea  - 用户输入初始想法（一句话灵感）
+2. title         - AI 生成 6 个书名建议 → 用户选择
+3. description   - AI 生成 6 个简介建议 → 用户选择
+4. genre         - AI 生成 6 个类型建议 → 用户选择
+5. tags          - AI 生成标签建议 → 用户选择
+6. background    - AI 生成世界观建议 → 最终创建项目
+```
+
+**实现特点**：
+- 每步提供 6 个选项（除标签外）
+- 用户可自定义替换任何建议
+- AI 严格基于用户的原始想法生成内容
+- 最终调用 `wizard_stream.py` 完整生成项目
+
+**前端对应**：`ProjectWizardNew.tsx` - 包含"向导模式"和"灵感模式"两种创建方式
+
+### 9. 写作风格管理
 
 **预设风格系统**（6种风格）：
 ```python
@@ -383,10 +423,14 @@ styled_prompt = WritingStyleManager.apply_style_to_prompt(base_prompt, style_con
 
 **当前方式**：未集成 Alembic，手动管理
 1. 修改 `backend/app/models/` 中的模型
-2. 删除/备份数据库文件：`backend/data/ai_story_user_*.db`
-3. 重启应用，`database.py` 的 `init_db()` 自动重建
+2. **生产环境**：需要手动执行 SQL ALTER 语句或使用数据库迁移工具
+3. **开发环境**：可以删除数据库重建（需备份重要数据）
 
-**生产环境建议**：集成 Alembic 进行版本化迁移
+**PostgreSQL 初始化**：
+- 首次部署时自动运行 `backend/scripts/init_postgres.sql`
+- 安装必需扩展：`pg_trgm`（用于模糊搜索）
+
+**生产环境建议**：集成 Alembic 进行版本化迁移，避免手动操作风险
 
 ### 添加新 AI 提供商
 
@@ -471,7 +515,7 @@ grep "GeneratorExit" backend/logs/app.log
 ```
 
 **数据存储**：
-- 数据库：`backend/data/ai_story_user_{user_id}.db`
+- PostgreSQL 数据库：由 `DATABASE_URL` 配置指定
 - ChromaDB：`backend/data/chroma/`（或内存，根据配置）
 - Embedding 模型缓存：`backend/embedding/`（约 420MB）
 - 用户数据文件：`backend/data/users.json`
@@ -481,6 +525,10 @@ grep "GeneratorExit" backend/logs/app.log
 
 **必需配置**（`backend/.env`）：
 ```bash
+# PostgreSQL 数据库（必需）
+DATABASE_URL=postgresql+asyncpg://mumuai:your_password@postgres:5432/mumuai_novel
+POSTGRES_PASSWORD=your_secure_password
+
 # AI 服务（至少配置一个）
 OPENAI_API_KEY=sk-...           # OpenAI API Key
 ANTHROPIC_API_KEY=sk-ant-...    # Anthropic API Key
@@ -509,6 +557,14 @@ APP_VERSION=1.0.0
 APP_HOST=0.0.0.0
 APP_PORT=8000
 DEBUG=false
+
+# ===== PostgreSQL 连接池（高并发优化）=====
+DATABASE_POOL_SIZE=30                     # 核心连接数
+DATABASE_MAX_OVERFLOW=20                  # 溢出连接数
+DATABASE_POOL_TIMEOUT=60                  # 连接超时（秒）
+DATABASE_POOL_RECYCLE=1800                # 连接回收（秒）
+DATABASE_POOL_PRE_PING=true               # 连接前检测
+DATABASE_POOL_USE_LIFO=true               # LIFO 策略
 
 # ===== 会话配置 =====
 SESSION_EXPIRE_MINUTES=120                # 会话过期时间（分钟）
@@ -540,6 +596,7 @@ LOG_BACKUP_COUNT=30                       # 保留 30 个备份
 **推荐模型**：
 - OpenAI：`gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo`
 - Anthropic：`claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`
+- Gemini：`gemini-2.0-flash-exp`, `gemini-1.5-pro`
 - Deepseek：`deepseek-chat`（自动处理 reasoning_content）
 
 ## 依赖版本管理
@@ -580,9 +637,10 @@ transformers==4.35.2           # 锁定版本
 ## 已知问题与限制
 
 1. **Deepseek 模型特殊处理**：自动丢弃 `reasoning_content`，仅使用 `content`
-2. **SQLite 并发限制**：
-   - 已优化：WAL 模式、5 秒锁超时、64MB 缓存
-   - 高并发场景（>50 并发）考虑切换 PostgreSQL
+2. **PostgreSQL 连接池限制**：
+   - 当前配置：30 核心 + 20 溢出 = 50 总连接
+   - 预估支持 80-150 并发用户
+   - 超过负载需调整连接池参数或扩展数据库实例
 3. **Cloudflare 拦截**：已使用自定义 User-Agent 规避，如仍被拦截检查中转 API 配置
 4. **会话内存存储**：用户会话存储在内存中，服务重启后需重新登录
 5. **无数据库迁移工具**：数据库结构变更需手动处理，生产环境建议集成 Alembic
@@ -590,6 +648,7 @@ transformers==4.35.2           # 锁定版本
 7. **Embedding 模型下载**：
    - 首次使用需联网下载约 420MB 模型
    - 国内网络可能较慢，建议配置镜像源或手动下载
+   - Docker Hub 镜像已包含模型文件
 8. **MCP 插件隔离**：
    - 每个用户独立插件实例，内存占用较高
    - 高并发场景需监控内存使用
@@ -598,8 +657,8 @@ transformers==4.35.2           # 锁定版本
 
 - **主分支**：`main`
 - **开发分支**：`dev`
-- **当前分支**：`chaos/增加短篇能力-1104`
 - **注意**：
   - 不要提交 `.env` 文件和 `data/` 目录（已在 .gitignore）
   - 不要提交 `embedding/` 模型缓存目录
+  - 不要提交 `postgres_data/` 数据库文件
   - 前端构建产物 `backend/static/` 由部署流程生成
