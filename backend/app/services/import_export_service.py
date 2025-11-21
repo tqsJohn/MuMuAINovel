@@ -144,18 +144,41 @@ class ImportExportService:
         )
         chapters = result.scalars().all()
         
-        return [
-            ChapterExportData(
+        # 构建大纲ID到标题的映射
+        outline_mapping = {}
+        if chapters:
+            outline_ids = [ch.outline_id for ch in chapters if ch.outline_id]
+            if outline_ids:
+                outline_result = await db.execute(
+                    select(Outline).where(Outline.id.in_(outline_ids))
+                )
+                outlines = outline_result.scalars().all()
+                outline_mapping = {ol.id: ol.title for ol in outlines}
+        
+        exported_chapters = []
+        for ch in chapters:
+            # 解析expansion_plan JSON
+            expansion_plan = None
+            if ch.expansion_plan:
+                try:
+                    expansion_plan = json.loads(ch.expansion_plan) if isinstance(ch.expansion_plan, str) else ch.expansion_plan
+                except:
+                    expansion_plan = None
+            
+            exported_chapters.append(ChapterExportData(
                 title=ch.title,
                 content=ch.content,
                 summary=ch.summary,
                 chapter_number=ch.chapter_number,
                 word_count=ch.word_count or 0,
                 status=ch.status,
-                created_at=ch.created_at.isoformat() if ch.created_at else None
-            )
-            for ch in chapters
-        ]
+                created_at=ch.created_at.isoformat() if ch.created_at else None,
+                outline_title=outline_mapping.get(ch.outline_id) if ch.outline_id else None,
+                sub_index=ch.sub_index,
+                expansion_plan=expansion_plan
+            ))
+        
+        return exported_chapters
     
     @staticmethod
     async def _export_characters(project_id: str, db: AsyncSession) -> List[CharacterExportData]:
@@ -482,26 +505,26 @@ class ImportExportService:
             
             logger.info(f"创建项目成功: {new_project.id}")
             
-            # 导入章节
-            chapters_count = await ImportExportService._import_chapters(
-                new_project.id, data.get("chapters", []), db
-            )
-            statistics["chapters"] = chapters_count
-            logger.info(f"导入章节数: {chapters_count}")
-            
-            # 导入角色（包括组织）
+            # 导入角色（包括组织）- 需要先导入角色，因为大纲可能需要角色信息
             char_mapping = await ImportExportService._import_characters(
                 new_project.id, data.get("characters", []), db
             )
             statistics["characters"] = len(char_mapping)
             logger.info(f"导入角色数: {len(char_mapping)}")
             
-            # 导入大纲
-            outlines_count = await ImportExportService._import_outlines(
+            # 导入大纲 - 需要在章节之前导入，以便建立关联
+            outline_mapping = await ImportExportService._import_outlines(
                 new_project.id, data.get("outlines", []), db
             )
-            statistics["outlines"] = outlines_count
-            logger.info(f"导入大纲数: {outlines_count}")
+            statistics["outlines"] = len(outline_mapping)
+            logger.info(f"导入大纲数: {len(outline_mapping)}")
+            
+            # 导入章节 - 使用大纲映射重建关联关系
+            chapters_count = await ImportExportService._import_chapters(
+                new_project.id, data.get("chapters", []), outline_mapping, db
+            )
+            statistics["chapters"] = chapters_count
+            logger.info(f"导入章节数: {chapters_count}")
             
             # 导入关系
             relationships_count = await ImportExportService._import_relationships(
@@ -558,11 +581,23 @@ class ImportExportService:
     async def _import_chapters(
         project_id: str,
         chapters_data: List[Dict],
+        outline_mapping: Dict[str, str],
         db: AsyncSession
     ) -> int:
         """导入章节"""
         count = 0
         for ch_data in chapters_data:
+            # 根据大纲标题查找对应的新大纲ID
+            outline_id = None
+            outline_title = ch_data.get("outline_title")
+            if outline_title and outline_title in outline_mapping:
+                outline_id = outline_mapping[outline_title]
+            
+            # 处理expansion_plan
+            expansion_plan = ch_data.get("expansion_plan")
+            if expansion_plan and isinstance(expansion_plan, dict):
+                expansion_plan = json.dumps(expansion_plan, ensure_ascii=False)
+            
             chapter = Chapter(
                 project_id=project_id,
                 title=ch_data.get("title"),
@@ -570,7 +605,10 @@ class ImportExportService:
                 summary=ch_data.get("summary"),
                 chapter_number=ch_data.get("chapter_number"),
                 word_count=ch_data.get("word_count", 0),
-                status=ch_data.get("status", "draft")
+                status=ch_data.get("status", "draft"),
+                outline_id=outline_id,
+                sub_index=ch_data.get("sub_index"),
+                expansion_plan=expansion_plan
             )
             db.add(chapter)
             count += 1
@@ -617,9 +655,10 @@ class ImportExportService:
         project_id: str,
         outlines_data: List[Dict],
         db: AsyncSession
-    ) -> int:
-        """导入大纲"""
-        count = 0
+    ) -> Dict[str, str]:
+        """导入大纲，返回标题到ID的映射"""
+        outline_mapping = {}
+        
         for ol_data in outlines_data:
             outline = Outline(
                 project_id=project_id,
@@ -629,9 +668,10 @@ class ImportExportService:
                 order_index=ol_data.get("order_index")
             )
             db.add(outline)
-            count += 1
+            await db.flush()  # 获取ID
+            outline_mapping[ol_data.get("title")] = outline.id
         
-        return count
+        return outline_mapping
     
     @staticmethod
     async def _import_relationships(

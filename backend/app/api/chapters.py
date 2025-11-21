@@ -344,6 +344,19 @@ async def delete_chapter(
     if project:
         project.current_words = max(0, project.current_words - chapter.word_count)
     
+    # 🗑️ 清理向量数据库中的记忆数据
+    try:
+        await memory_service.delete_chapter_memories(
+            user_id=user_id,
+            project_id=chapter.project_id,
+            chapter_id=chapter_id
+        )
+        logger.info(f"✅ 已清理章节 {chapter_id[:8]} 的向量记忆数据")
+    except Exception as e:
+        logger.warning(f"⚠️ 清理向量记忆数据失败: {str(e)}")
+        # 不阻断删除流程，继续执行
+    
+    # 删除章节（关系数据库中的记忆会被级联删除）
     await db.delete(chapter)
     await db.commit()
     

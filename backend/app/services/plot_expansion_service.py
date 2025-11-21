@@ -333,16 +333,43 @@ class PlotExpansionService:
         """
         logger.info(f"根据规划创建 {len(chapter_plans)} 个章节记录")
         
-        # 如果没有指定起始章节号，自动计算
+        # 如果没有指定起始章节号，根据大纲顺序自动计算
         if start_chapter_number is None:
-            # 查询项目中已有章节的最大序号
-            max_number_result = await db.execute(
-                select(func.max(Chapter.chapter_number))
-                .where(Chapter.project_id == project_id)
+            # 1. 获取当前大纲信息
+            outline_result = await db.execute(
+                select(Outline).where(Outline.id == outline_id)
             )
-            max_number = max_number_result.scalar()
-            start_chapter_number = (max_number or 0) + 1
-            logger.info(f"自动计算起始章节号: {start_chapter_number} (当前最大序号: {max_number})")
+            current_outline = outline_result.scalar_one_or_none()
+            
+            if not current_outline:
+                raise ValueError(f"大纲 {outline_id} 不存在")
+            
+            # 2. 查询所有在当前大纲之前的大纲（按order_index排序）
+            prev_outlines_result = await db.execute(
+                select(Outline)
+                .where(
+                    Outline.project_id == project_id,
+                    Outline.order_index < current_outline.order_index
+                )
+                .order_by(Outline.order_index)
+            )
+            prev_outlines = prev_outlines_result.scalars().all()
+            
+            # 3. 计算前面所有大纲已展开的章节总数
+            total_prev_chapters = 0
+            for prev_outline in prev_outlines:
+                count_result = await db.execute(
+                    select(func.count(Chapter.id))
+                    .where(
+                        Chapter.project_id == project_id,
+                        Chapter.outline_id == prev_outline.id
+                    )
+                )
+                total_prev_chapters += count_result.scalar() or 0
+            
+            # 4. 起始章节号 = 前面所有大纲的章节数 + 1
+            start_chapter_number = total_prev_chapters + 1
+            logger.info(f"自动计算起始章节号: {start_chapter_number} (基于大纲order_index={current_outline.order_index}, 前置章节数={total_prev_chapters})")
         
         chapters = []
         for idx, plan in enumerate(chapter_plans):
@@ -376,6 +403,14 @@ class PlotExpansionService:
             await db.refresh(chapter)
         
         logger.info(f"成功创建 {len(chapters)} 个章节记录（已保存展开规划数据）")
+        
+        # 重新排序当前大纲之后的所有章节
+        await self._renumber_subsequent_chapters(
+            project_id=project_id,
+            current_outline_id=outline_id,
+            db=db
+        )
+        
         return chapters
     
     async def _get_outline_context(
@@ -715,6 +750,94 @@ class PlotExpansionService:
                 "conflict_type": "未知",
                 "estimated_words": 3000
             }]
+
+
+    async def _renumber_subsequent_chapters(
+        self,
+        project_id: str,
+        current_outline_id: str,
+        db: AsyncSession
+    ):
+        """
+        重新计算当前大纲之后所有大纲的章节序号
+        
+        Args:
+            project_id: 项目ID
+            current_outline_id: 当前大纲ID
+            db: 数据库会话
+        """
+        logger.info(f"开始重新排序大纲 {current_outline_id} 之后的所有章节")
+        
+        # 1. 获取当前大纲信息
+        current_outline_result = await db.execute(
+            select(Outline).where(Outline.id == current_outline_id)
+        )
+        current_outline = current_outline_result.scalar_one_or_none()
+        
+        if not current_outline:
+            logger.warning(f"大纲 {current_outline_id} 不存在，跳过重新排序")
+            return
+        
+        # 2. 获取当前大纲及之后的所有大纲（按order_index排序）
+        subsequent_outlines_result = await db.execute(
+            select(Outline)
+            .where(
+                Outline.project_id == project_id,
+                Outline.order_index >= current_outline.order_index
+            )
+            .order_by(Outline.order_index)
+        )
+        subsequent_outlines = subsequent_outlines_result.scalars().all()
+        
+        # 3. 计算每个大纲的起始章节号
+        current_chapter_number = 1
+        
+        # 先计算前面大纲的章节总数
+        prev_outlines_result = await db.execute(
+            select(Outline)
+            .where(
+                Outline.project_id == project_id,
+                Outline.order_index < current_outline.order_index
+            )
+            .order_by(Outline.order_index)
+        )
+        prev_outlines = prev_outlines_result.scalars().all()
+        
+        for prev_outline in prev_outlines:
+            count_result = await db.execute(
+                select(func.count(Chapter.id))
+                .where(
+                    Chapter.project_id == project_id,
+                    Chapter.outline_id == prev_outline.id
+                )
+            )
+            current_chapter_number += count_result.scalar() or 0
+        
+        # 4. 逐个大纲更新章节序号
+        updated_count = 0
+        for outline in subsequent_outlines:
+            # 获取该大纲的所有章节（按sub_index排序）
+            chapters_result = await db.execute(
+                select(Chapter)
+                .where(
+                    Chapter.project_id == project_id,
+                    Chapter.outline_id == outline.id
+                )
+                .order_by(Chapter.sub_index)
+            )
+            chapters = chapters_result.scalars().all()
+            
+            # 更新每个章节的chapter_number
+            for chapter in chapters:
+                if chapter.chapter_number != current_chapter_number:
+                    logger.debug(f"更新章节 {chapter.id}: {chapter.chapter_number} -> {current_chapter_number}")
+                    chapter.chapter_number = current_chapter_number
+                    updated_count += 1
+                current_chapter_number += 1
+        
+        # 5. 提交更新
+        await db.commit()
+        logger.info(f"重新排序完成，共更新 {updated_count} 个章节的序号")
 
 
 # 工厂函数

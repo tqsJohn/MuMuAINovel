@@ -75,7 +75,7 @@ docker-compose up -d
 >
 > 1. **`.env` 文件挂载**: `docker-compose.yml` 会自动将 `.env` 挂载到容器，确保文件存在
 > 2. **数据库初始化**: `init_postgres.sql` 会在首次启动时自动执行，安装必要的PostgreSQL扩展
-> 3. **自行构建**: 如需从源码构建，请先下载 embedding 模型文件（[加群获取](https://linux.do/t/topic/1100112)）
+> 3. **自行构建**: 如需从源码构建，请先下载 embedding 模型文件（[加群获取](frontend/public/qq.jpg)）
 
 ### 使用 Docker Hub 镜像（推荐新手）
 

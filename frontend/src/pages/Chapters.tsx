@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, Tooltip, InputNumber, Progress, Alert, Radio, Descriptions, Collapse } from 'antd';
-import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined } from '@ant-design/icons';
+import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, Tooltip, InputNumber, Progress, Alert, Radio, Descriptions, Collapse, Popconfirm } from 'antd';
+import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useChapterSync } from '../store/hooks';
 import { projectApi, writingStyleApi } from '../services/api';
@@ -59,6 +59,7 @@ export default function Chapters() {
   const {
     refreshChapters,
     updateChapter,
+    deleteChapter,
     generateChapterContentStream
   } = useChapterSync();
 
@@ -827,6 +828,26 @@ export default function Chapters() {
     }
   };
 
+  // 删除章节处理函数
+  const handleDeleteChapter = async (chapterId: string) => {
+    try {
+      await deleteChapter(chapterId);
+      
+      // 刷新章节列表
+      await refreshChapters();
+      
+      // 刷新项目信息以更新总字数统计
+      if (currentProject) {
+        const updatedProject = await projectApi.getProject(currentProject.id);
+        setCurrentProject(updatedProject);
+      }
+      
+      message.success('章节删除成功');
+    } catch (error: any) {
+      message.error('删除章节失败：' + (error.message || '未知错误'));
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{
@@ -957,6 +978,22 @@ export default function Chapters() {
                   >
                     修改信息
                   </Button>,
+                  <Popconfirm
+                    title="确定删除这个章节吗？"
+                    description="删除后将无法恢复，章节内容和分析结果都将被删除。"
+                    onConfirm={() => handleDeleteChapter(item.id)}
+                    okText="确定删除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                  >
+                    <Button
+                      type="text"
+                      danger
+                      icon={<DeleteOutlined />}
+                    >
+                      删除
+                    </Button>
+                  </Popconfirm>,
                       ]}
                     >
                       <div style={{ width: '100%' }}>
@@ -1049,6 +1086,22 @@ export default function Chapters() {
                               size="small"
                               title="修改信息"
                             />
+                            <Popconfirm
+                              title="确定删除？"
+                              description="删除后无法恢复"
+                              onConfirm={() => handleDeleteChapter(item.id)}
+                              okText="删除"
+                              cancelText="取消"
+                              okButtonProps={{ danger: true }}
+                            >
+                              <Button
+                                type="text"
+                                danger
+                                icon={<DeleteOutlined />}
+                                size="small"
+                                title="删除章节"
+                              />
+                            </Popconfirm>
                           </Space>
                         )}
                       </div>

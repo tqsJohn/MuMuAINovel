@@ -48,6 +48,7 @@ const Inspiration: React.FC = () => {
   const [projectTitle, setProjectTitle] = useState<string>('');
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState('');
+  const [errorDetails, setErrorDetails] = useState<string>(''); // 新增：错误详情
   const [generationSteps, setGenerationSteps] = useState<{
     worldBuilding: 'pending' | 'processing' | 'completed' | 'error';
     characters: 'pending' | 'processing' | 'completed' | 'error';
@@ -57,6 +58,11 @@ const Inspiration: React.FC = () => {
     characters: 'pending',
     outline: 'pending'
   });
+  
+  // 新增：保存生成数据，用于重试
+  const [generationData, setGenerationData] = useState<WizardData | null>(null);
+  // 保存世界观生成结果，用于后续步骤
+  const [worldBuildingResult, setWorldBuildingResult] = useState<any>(null);
   
   // 滚动容器引用
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -334,6 +340,8 @@ const Inspiration: React.FC = () => {
       setProjectTitle(data.title);
       setProgress(0);
       setProgressMessage('开始创建项目...');
+      setErrorDetails(''); // 清空错误详情
+      setGenerationData(data); // 保存数据用于重试
 
       // 步骤1: 生成世界观并创建项目
       setGenerationSteps(prev => ({ ...prev, worldBuilding: 'processing' }));
@@ -357,10 +365,14 @@ const Inspiration: React.FC = () => {
           },
           onResult: (result) => {
             setProjectId(result.project_id);
+            setWorldBuildingResult(result); // 保存世界观结果
             setGenerationSteps(prev => ({ ...prev, worldBuilding: 'completed' }));
           },
           onError: (error) => {
+            console.error('世界观生成失败:', error);
+            setErrorDetails(`世界观生成失败: ${error}`);
             setGenerationSteps(prev => ({ ...prev, worldBuilding: 'error' }));
+            setLoading(false); // 确保错误时解除加载状态
             throw new Error(error);
           },
           onComplete: () => {
@@ -370,11 +382,12 @@ const Inspiration: React.FC = () => {
       );
 
       if (!worldResult?.project_id) {
-        throw new Error('项目创建失败');
+        throw new Error('项目创建失败：未获取到项目ID');
       }
 
       const createdProjectId = worldResult.project_id;
       setProjectId(createdProjectId);
+      setWorldBuildingResult(worldResult); // 保存世界观结果
 
       // 步骤2: 生成角色
       setGenerationSteps(prev => ({ ...prev, characters: 'processing' }));
@@ -403,7 +416,10 @@ const Inspiration: React.FC = () => {
             setGenerationSteps(prev => ({ ...prev, characters: 'completed' }));
           },
           onError: (error) => {
+            console.error('角色生成失败:', error);
+            setErrorDetails(`角色生成失败: ${error}`);
             setGenerationSteps(prev => ({ ...prev, characters: 'error' }));
+            setLoading(false); // 确保错误时解除加载状态
             throw new Error(error);
           },
           onComplete: () => {
@@ -433,7 +449,10 @@ const Inspiration: React.FC = () => {
             setGenerationSteps(prev => ({ ...prev, outline: 'completed' }));
           },
           onError: (error) => {
+            console.error('大纲生成失败:', error);
+            setErrorDetails(`大纲生成失败: ${error}`);
             setGenerationSteps(prev => ({ ...prev, outline: 'error' }));
+            setLoading(false); // 确保错误时解除加载状态
             throw new Error(error);
           },
           onComplete: () => {
@@ -450,16 +469,300 @@ const Inspiration: React.FC = () => {
       
     } catch (error) {
       const apiError = error as ApiError;
-      message.error('创建项目失败：' + (apiError.response?.data?.detail || apiError.message || '未知错误'));
-      setCurrentStep('genre');
-      setGenerationSteps({
-        worldBuilding: 'pending',
-        characters: 'pending',
-        outline: 'pending'
-      });
-    } finally {
+      const errorMsg = apiError.response?.data?.detail || apiError.message || '未知错误';
+      console.error('创建项目失败:', errorMsg);
+      setErrorDetails(errorMsg);
+      message.error('创建项目失败：' + errorMsg);
+      // 不重置步骤，保持在generating状态以显示重试按钮
+      setLoading(false); // 确保在错误时也设置loading为false
+    }
+  };
+
+  // 智能重试：从失败的步骤继续生成
+  const handleSmartRetry = async () => {
+    if (!generationData) {
+      message.warning('缺少生成数据');
+      return;
+    }
+
+    setLoading(true);
+    setErrorDetails('');
+
+    try {
+      // 判断从哪个步骤开始重试
+      if (generationSteps.worldBuilding === 'error') {
+        // 世界观失败，从世界观开始重新生成
+        message.info('从世界观步骤开始重新生成...');
+        await retryFromWorldBuilding();
+      } else if (generationSteps.characters === 'error') {
+        // 角色失败，从角色开始生成
+        message.info('从角色步骤继续生成...');
+        await retryFromCharacters();
+      } else if (generationSteps.outline === 'error') {
+        // 大纲失败，从大纲开始生成
+        message.info('从大纲步骤继续生成...');
+        await retryFromOutline();
+      }
+    } catch (error: any) {
+      console.error('智能重试失败:', error);
+      message.error('重试失败：' + (error.message || '未知错误'));
       setLoading(false);
     }
+  };
+
+  // 从世界观步骤重新开始
+  const retryFromWorldBuilding = async () => {
+    if (!generationData) return;
+
+    setGenerationSteps(prev => ({ ...prev, worldBuilding: 'processing' }));
+    setProgressMessage('重新生成世界观...');
+
+    try {
+      const worldResult = await wizardStreamApi.generateWorldBuildingStream(
+        {
+          title: generationData.title,
+          description: generationData.description,
+          theme: generationData.theme,
+          genre: generationData.genre.join('、'),
+          narrative_perspective: generationData.narrative_perspective,
+          target_words: 100000,
+          chapter_count: 5,
+          character_count: 5,
+        },
+        {
+          onProgress: (msg, prog) => {
+            setProgress(Math.floor(prog / 3));
+            setProgressMessage(msg);
+          },
+          onResult: (result) => {
+            setProjectId(result.project_id);
+            setWorldBuildingResult(result);
+            setGenerationSteps(prev => ({ ...prev, worldBuilding: 'completed' }));
+          },
+          onError: (error) => {
+            console.error('世界观生成失败:', error);
+            setErrorDetails(`世界观生成失败: ${error}`);
+            setGenerationSteps(prev => ({ ...prev, worldBuilding: 'error' }));
+            setLoading(false);
+            throw new Error(error);
+          },
+          onComplete: () => {
+            console.log('世界观重新生成完成');
+          }
+        }
+      );
+
+      if (!worldResult?.project_id) {
+        throw new Error('项目创建失败：未获取到项目ID');
+      }
+
+      // 继续生成角色和大纲
+      await continueFromCharacters(worldResult);
+    } catch (error: any) {
+      throw error;
+    }
+  };
+
+  // 从角色步骤继续
+  const retryFromCharacters = async () => {
+    if (!generationData || !projectId || !worldBuildingResult) {
+      message.warning('缺少必要数据，无法从角色步骤继续');
+      setLoading(false);
+      return;
+    }
+
+    setGenerationSteps(prev => ({ ...prev, characters: 'processing' }));
+    setProgressMessage('重新生成角色...');
+
+    try {
+      await wizardStreamApi.generateCharactersStream(
+        {
+          project_id: projectId,
+          count: 5,
+          world_context: {
+            time_period: worldBuildingResult.time_period || '',
+            location: worldBuildingResult.location || '',
+            atmosphere: worldBuildingResult.atmosphere || '',
+            rules: worldBuildingResult.rules || '',
+          },
+          theme: generationData.theme,
+          genre: generationData.genre.join('、'),
+        },
+        {
+          onProgress: (msg, prog) => {
+            setProgress(33 + Math.floor(prog / 3));
+            setProgressMessage(msg);
+          },
+          onResult: (result) => {
+            console.log(`成功生成${result.characters?.length || 0}个角色`);
+            setGenerationSteps(prev => ({ ...prev, characters: 'completed' }));
+          },
+          onError: (error) => {
+            console.error('角色生成失败:', error);
+            setErrorDetails(`角色生成失败: ${error}`);
+            setGenerationSteps(prev => ({ ...prev, characters: 'error' }));
+            setLoading(false);
+            throw new Error(error);
+          },
+          onComplete: () => {
+            console.log('角色重新生成完成');
+          }
+        }
+      );
+
+      // 继续生成大纲
+      await continueFromOutline();
+    } catch (error: any) {
+      throw error;
+    }
+  };
+
+  // 从大纲步骤继续
+  const retryFromOutline = async () => {
+    if (!generationData || !projectId) {
+      message.warning('缺少必要数据，无法从大纲步骤继续');
+      setLoading(false);
+      return;
+    }
+
+    setGenerationSteps(prev => ({ ...prev, outline: 'processing' }));
+    setProgressMessage('重新生成大纲...');
+
+    try {
+      await wizardStreamApi.generateCompleteOutlineStream(
+        {
+          project_id: projectId,
+          chapter_count: 5,
+          narrative_perspective: generationData.narrative_perspective,
+          target_words: 100000,
+        },
+        {
+          onProgress: (msg, prog) => {
+            setProgress(66 + Math.floor(prog / 3));
+            setProgressMessage(msg);
+          },
+          onResult: () => {
+            console.log('大纲生成完成');
+            setGenerationSteps(prev => ({ ...prev, outline: 'completed' }));
+          },
+          onError: (error) => {
+            console.error('大纲生成失败:', error);
+            setErrorDetails(`大纲生成失败: ${error}`);
+            setGenerationSteps(prev => ({ ...prev, outline: 'error' }));
+            setLoading(false);
+            throw new Error(error);
+          },
+          onComplete: () => {
+            console.log('大纲重新生成完成');
+          }
+        }
+      );
+
+      // 全部完成
+      setProgress(100);
+      setProgressMessage('项目创建完成！');
+      setCurrentStep('complete');
+      message.success('项目创建成功！');
+      setLoading(false);
+    } catch (error: any) {
+      throw error;
+    }
+  };
+
+  // 从角色步骤开始的完整流程（世界观成功后调用）
+  const continueFromCharacters = async (worldResult: any) => {
+    if (!generationData || !worldResult?.project_id) return;
+
+    try {
+      // 生成角色
+      setGenerationSteps(prev => ({ ...prev, characters: 'processing' }));
+      setProgressMessage('正在生成角色...');
+
+      await wizardStreamApi.generateCharactersStream(
+        {
+          project_id: worldResult.project_id,
+          count: 5,
+          world_context: {
+            time_period: worldResult.time_period || '',
+            location: worldResult.location || '',
+            atmosphere: worldResult.atmosphere || '',
+            rules: worldResult.rules || '',
+          },
+          theme: generationData.theme,
+          genre: generationData.genre.join('、'),
+        },
+        {
+          onProgress: (msg, prog) => {
+            setProgress(33 + Math.floor(prog / 3));
+            setProgressMessage(msg);
+          },
+          onResult: (result) => {
+            console.log(`成功生成${result.characters?.length || 0}个角色`);
+            setGenerationSteps(prev => ({ ...prev, characters: 'completed' }));
+          },
+          onError: (error) => {
+            console.error('角色生成失败:', error);
+            setErrorDetails(`角色生成失败: ${error}`);
+            setGenerationSteps(prev => ({ ...prev, characters: 'error' }));
+            setLoading(false);
+            throw new Error(error);
+          },
+          onComplete: () => {
+            console.log('角色生成完成');
+          }
+        }
+      );
+
+      // 生成大纲
+      await continueFromOutline();
+    } catch (error: any) {
+      console.error('继续生成失败:', error);
+      throw error;
+    }
+  };
+
+  // 从大纲步骤开始的完整流程（角色成功后调用）
+  const continueFromOutline = async () => {
+    if (!generationData || !projectId) return;
+
+    setGenerationSteps(prev => ({ ...prev, outline: 'processing' }));
+    setProgressMessage('正在生成大纲...');
+
+    await wizardStreamApi.generateCompleteOutlineStream(
+      {
+        project_id: projectId,
+        chapter_count: 5,
+        narrative_perspective: generationData.narrative_perspective,
+        target_words: 100000,
+      },
+      {
+        onProgress: (msg, prog) => {
+          setProgress(66 + Math.floor(prog / 3));
+          setProgressMessage(msg);
+        },
+        onResult: () => {
+          console.log('大纲生成完成');
+          setGenerationSteps(prev => ({ ...prev, outline: 'completed' }));
+        },
+        onError: (error) => {
+          console.error('大纲生成失败:', error);
+          setErrorDetails(`大纲生成失败: ${error}`);
+          setGenerationSteps(prev => ({ ...prev, outline: 'error' }));
+          setLoading(false);
+          throw new Error(error);
+        },
+        onComplete: () => {
+          console.log('大纲生成完成');
+        }
+      }
+    );
+
+    // 全部完成
+    setProgress(100);
+    setProgressMessage('项目创建完成！');
+    setCurrentStep('complete');
+    message.success('项目创建成功！');
+    setLoading(false);
   };
 
   const handleConfirmGenres = async () => {
@@ -630,6 +933,10 @@ const Inspiration: React.FC = () => {
       return { icon: '○', color: '#d9d9d9' };
     };
 
+    const hasError = generationSteps.worldBuilding === 'error' ||
+                     generationSteps.characters === 'error' ||
+                     generationSteps.outline === 'error';
+
     return (
       <div style={{ textAlign: 'center', padding: '40px 20px' }}>
         <Title level={3} style={{ marginBottom: 32, color: '#fff' }}>
@@ -639,7 +946,7 @@ const Inspiration: React.FC = () => {
         <Card style={{ marginBottom: 24 }}>
           <Progress
             percent={progress}
-            status={progress === 100 ? 'success' : 'active'}
+            status={hasError ? 'exception' : (progress === 100 ? 'success' : 'active')}
             strokeColor={{
               '0%': '#667eea',
               '100%': '#764ba2',
@@ -647,9 +954,26 @@ const Inspiration: React.FC = () => {
             style={{ marginBottom: 24 }}
           />
 
-          <Paragraph style={{ fontSize: 16, marginBottom: 32, color: '#666' }}>
+          <Paragraph style={{ fontSize: 16, marginBottom: 32, color: hasError ? '#ff4d4f' : '#666' }}>
             {progressMessage}
           </Paragraph>
+
+          {/* 错误详情显示 */}
+          {errorDetails && (
+            <Card
+              size="small"
+              style={{
+                marginBottom: 24,
+                background: '#fff2f0',
+                borderColor: '#ffccc7',
+                textAlign: 'left'
+              }}
+            >
+              <Text strong style={{ color: '#ff4d4f' }}>错误详情：</Text>
+              <br />
+              <Text style={{ color: '#666', fontSize: 14 }}>{errorDetails}</Text>
+            </Card>
+          )}
 
           <Space direction="vertical" size={16} style={{ width: '100%', maxWidth: 400, margin: '0 auto' }}>
             {[
@@ -666,9 +990,9 @@ const Inspiration: React.FC = () => {
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     padding: '12px 20px',
-                    background: step === 'processing' ? '#f0f5ff' : '#fafafa',
+                    background: step === 'processing' ? '#f0f5ff' : (step === 'error' ? '#fff2f0' : '#fafafa'),
                     borderRadius: 8,
-                    border: `1px solid ${step === 'processing' ? '#d6e4ff' : '#f0f0f0'}`,
+                    border: `1px solid ${step === 'processing' ? '#d6e4ff' : (step === 'error' ? '#ffccc7' : '#f0f0f0')}`,
                   }}
                 >
                   <Text style={{ fontSize: 16, fontWeight: step === 'processing' ? 600 : 400 }}>
@@ -684,8 +1008,22 @@ const Inspiration: React.FC = () => {
         </Card>
 
         <Paragraph type="secondary" style={{ color: '#fff', opacity: 0.9 }}>
-          请耐心等待，AI正在为您精心创作...
+          {hasError ? '生成过程中出现错误，请点击重试按钮重新生成' : '请耐心等待，AI正在为您精心创作...'}
         </Paragraph>
+        
+        {hasError && (
+          <Space style={{ marginTop: 16 }}>
+            <Button
+              type="primary"
+              size="large"
+              onClick={handleSmartRetry}
+              loading={loading}
+              disabled={loading}
+            >
+              继续生成
+            </Button>
+          </Space>
+        )}
       </div>
     );
   };

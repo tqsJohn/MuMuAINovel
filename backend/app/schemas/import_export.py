@@ -19,6 +19,11 @@ class ChapterExportData(BaseModel):
     word_count: int = 0
     status: str = "draft"
     created_at: Optional[str] = None
+    
+    # 大纲细化功能新增字段
+    outline_title: Optional[str] = None  # 关联的大纲标题（用于导入时重建关联）
+    sub_index: Optional[int] = None  # 大纲下的子章节序号
+    expansion_plan: Optional[Dict[str, Any]] = None  # 展开规划详情（JSON对象）
 
 
 class CharacterExportData(BaseModel):

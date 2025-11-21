@@ -17,6 +17,7 @@ from app.models.project_default_style import ProjectDefaultStyle
 from app.services.ai_service import AIService
 from app.services.mcp_tool_service import MCPToolService
 from app.services.prompt_service import prompt_service
+from app.services.plot_expansion_service import PlotExpansionService
 from app.logger import get_logger
 from app.utils.sse_response import SSEResponse, create_sse_response
 from app.api.settings import get_user_ai_service
@@ -875,23 +876,21 @@ async def outline_generator(
     db: AsyncSession,
     user_ai_service: AIService
 ) -> AsyncGenerator[str, None]:
-    """大纲生成流式生成器 - 向导固定生成前5章作为开局"""
+    """大纲生成流式生成器 - 向导生成3个大纲节点，每个展开为3章，共9章"""
     db_committed = False
     try:
         yield await SSEResponse.send_progress("开始生成大纲...", 5)
         
         project_id = data.get("project_id")
-        # 向导固定生成5章，忽略传入的chapter_count
-        chapter_count = 5
+        # 向导固定生成3个大纲节点
+        outline_count = 3
+        # 每个大纲展开为3章
+        chapters_per_outline = 3
         narrative_perspective = data.get("narrative_perspective")
         target_words = data.get("target_words", 100000)
         requirements = data.get("requirements", "")
         provider = data.get("provider")
         model = data.get("model")
-        
-        # 5章一次性生成，不需要分批
-        BATCH_SIZE = 5
-        MAX_RETRIES = 3
         
         # 获取项目信息
         yield await SSEResponse.send_progress("加载项目信息...", 10)
@@ -915,192 +914,156 @@ async def outline_generator(
             for char in characters
         ])
         
-        # 分批生成大纲
-        yield await SSEResponse.send_progress("准备分批生成大纲...", 20)
+        # 第一阶段：生成3个粗粒度大纲节点
+        yield await SSEResponse.send_progress(f"生成{outline_count}个大纲节点...", 20)
         
-        all_outlines = []
-        total_batches = (chapter_count + BATCH_SIZE - 1) // BATCH_SIZE
+        outline_requirements = f"{requirements}\n\n【重要说明】这是小说的开局部分，请生成{outline_count}个大纲节点，重点关注：\n"
+        outline_requirements += "1. 引入主要角色和世界观设定\n"
+        outline_requirements += "2. 建立主线冲突和故事钩子\n"
+        outline_requirements += "3. 展开初期情节，为后续发展埋下伏笔\n"
+        outline_requirements += "4. 不要试图完结故事，这只是开始部分\n"
+        outline_requirements += "5. 不要在JSON字符串值中使用中文引号（""''），请使用【】或《》标记\n"
         
-        for batch_idx in range(total_batches):
-            start_chapter = batch_idx * BATCH_SIZE + 1
-            end_chapter = min((batch_idx + 1) * BATCH_SIZE, chapter_count)
-            current_batch_size = end_chapter - start_chapter + 1
-            
-            batch_progress = 20 + (batch_idx * 55 // total_batches)
-            
-            # 重试逻辑
-            retry_count = 0
-            batch_success = False
-            
-            while retry_count < MAX_RETRIES and not batch_success:
-                try:
-                    retry_suffix = f" (重试{retry_count}/{MAX_RETRIES})" if retry_count > 0 else ""
-                    yield await SSEResponse.send_progress(
-                        f"生成第{start_chapter}-{end_chapter}章大纲{retry_suffix}...",
-                        batch_progress
-                    )
-                    
-                    # 构建批次提示词 - 包含前文摘要保持故事连贯
-                    previous_context = ""
-                    if all_outlines:
-                        previous_context = "\n\n【前文情节摘要】:\n"
-                        for outline in all_outlines[-3:]:  # 只包含最近3章,避免过长
-                            ch_num = outline.get("chapter_number", "?")
-                            ch_title = outline.get("title", "未命名")
-                            ch_summary = outline.get("summary", "")[:100]
-                            previous_context += f"第{ch_num}章《{ch_title}》: {ch_summary}...\n"
-                        previous_context += f"\n请确保第{start_chapter}-{end_chapter}章与前文情节自然衔接,保持故事连贯性。\n"
-                    
-                    # 向导专用的开局大纲要求
-                    batch_requirements = f"{requirements}\n\n【重要说明】这是小说的开局部分，请生成前5章大纲，重点关注：\n"
-                    batch_requirements += "1. 引入主要角色和世界观设定\n"
-                    batch_requirements += "2. 建立主线冲突和故事钩子\n"
-                    batch_requirements += "3. 展开初期情节，为后续发展埋下伏笔\n"
-                    batch_requirements += "4. 不要试图完结故事，这只是开始部分\n"
-                    batch_requirements += "5. 不要在JSON字符串值中使用中文引号（""''），请使用【】或《》标记\n"
-                    
-                    batch_prompt = prompt_service.get_complete_outline_prompt(
-                        title=project.title,
-                        theme=project.theme or "未设定",
-                        genre=project.genre or "通用",
-                        chapter_count=5,  # 固定5章
-                        narrative_perspective=narrative_perspective,
-                        target_words=target_words // 20,  # 开局约占总字数的1/20
-                        time_period=project.world_time_period or "未设定",
-                        location=project.world_location or "未设定",
-                        atmosphere=project.world_atmosphere or "未设定",
-                        rules=project.world_rules or "未设定",
-                        characters_info=characters_info or "暂无角色信息",
-                        requirements=batch_requirements
-                    )
-                    
-                    # 流式生成
-                    accumulated_text = ""
-                    async for chunk in user_ai_service.generate_text_stream(
-                        prompt=batch_prompt,
-                        provider=provider,
-                        model=model
-                    ):
-                        accumulated_text += chunk
-                        yield await SSEResponse.send_chunk(chunk)
-                    
-                    # 解析结果
-                    cleaned_text = accumulated_text.strip()
-                    
-                    # 移除markdown代码块标记
-                    if cleaned_text.startswith('```json'):
-                        cleaned_text = cleaned_text[7:].lstrip('\n\r')
-                    elif cleaned_text.startswith('```'):
-                        cleaned_text = cleaned_text[3:].lstrip('\n\r')
-                    if cleaned_text.endswith('```'):
-                        cleaned_text = cleaned_text[:-3].rstrip('\n\r')
-                    cleaned_text = cleaned_text.strip()
-                    
-                    batch_outline_data = json.loads(cleaned_text)
-                    if not isinstance(batch_outline_data, list):
-                        batch_outline_data = [batch_outline_data]
-                    
-                    # 验证生成数量
-                    if len(batch_outline_data) < current_batch_size:
-                        logger.warning(f"批次{batch_idx+1}生成数量不足: 期望{current_batch_size}, 实际{len(batch_outline_data)}")
-                        if retry_count < MAX_RETRIES - 1:
-                            retry_count += 1
-                            yield await SSEResponse.send_progress(
-                                f"生成数量不足，准备重试...",
-                                batch_progress,
-                                "warning"
-                            )
-                            continue
-                    
-                    # 修正章节编号
-                    for i, chapter_data in enumerate(batch_outline_data):
-                        chapter_data["chapter_number"] = start_chapter + i
-                    
-                    all_outlines.extend(batch_outline_data)
-                    batch_success = True
-                    logger.info(f"批次{batch_idx+1}成功生成{len(batch_outline_data)}章大纲")
-                    
-                except json.JSONDecodeError as e:
-                    logger.error(f"大纲生成批次{batch_idx+1} JSON解析失败(尝试{retry_count+1}/{MAX_RETRIES}): {e}")
-                    retry_count += 1
-                    if retry_count < MAX_RETRIES:
-                        yield await SSEResponse.send_progress(
-                            f"解析失败，准备重试...",
-                            batch_progress,
-                            "warning"
-                        )
-                    else:
-                        yield await SSEResponse.send_progress(
-                            f"批次{batch_idx+1}多次重试失败，跳过",
-                            batch_progress,
-                            "warning"
-                        )
-                except Exception as e:
-                    logger.error(f"批次{batch_idx+1}生成异常(尝试{retry_count+1}/{MAX_RETRIES}): {e}")
-                    retry_count += 1
-                    if retry_count < MAX_RETRIES:
-                        yield await SSEResponse.send_progress(
-                            f"生成异常，准备重试...",
-                            batch_progress,
-                            "warning"
-                        )
-                    else:
-                        yield await SSEResponse.send_progress(
-                            f"批次{batch_idx+1}多次重试失败，跳过",
-                            batch_progress,
-                            "warning"
-                        )
+        outline_prompt = prompt_service.get_complete_outline_prompt(
+            title=project.title,
+            theme=project.theme or "未设定",
+            genre=project.genre or "通用",
+            chapter_count=outline_count,
+            narrative_perspective=narrative_perspective,
+            target_words=target_words // 10,  # 开局约占总字数的1/10
+            time_period=project.world_time_period or "未设定",
+            location=project.world_location or "未设定",
+            atmosphere=project.world_atmosphere or "未设定",
+            rules=project.world_rules or "未设定",
+            characters_info=characters_info or "暂无角色信息",
+            requirements=outline_requirements
+        )
         
-        if not all_outlines:
-            yield await SSEResponse.send_error("所有批次都生成失败，请重试")
+        # 流式生成大纲
+        accumulated_text = ""
+        async for chunk in user_ai_service.generate_text_stream(
+            prompt=outline_prompt,
+            provider=provider,
+            model=model
+        ):
+            accumulated_text += chunk
+            yield await SSEResponse.send_chunk(chunk)
+        
+        # 解析大纲结果
+        yield await SSEResponse.send_progress("解析大纲...", 40)
+        cleaned_text = accumulated_text.strip()
+        if cleaned_text.startswith('```json'):
+            cleaned_text = cleaned_text[7:].lstrip('\n\r')
+        elif cleaned_text.startswith('```'):
+            cleaned_text = cleaned_text[3:].lstrip('\n\r')
+        if cleaned_text.endswith('```'):
+            cleaned_text = cleaned_text[:-3].rstrip('\n\r')
+        cleaned_text = cleaned_text.strip()
+        
+        try:
+            outline_data = json.loads(cleaned_text)
+            if not isinstance(outline_data, list):
+                outline_data = [outline_data]
+        except json.JSONDecodeError as e:
+            logger.error(f"大纲JSON解析失败: {e}")
+            yield await SSEResponse.send_error("大纲生成失败，请重试")
             return
         
-        outline_data = all_outlines
-        
-        # 保存到数据库
-        yield await SSEResponse.send_progress("保存大纲到数据库...", 90)
-        
+        # 保存大纲到数据库
+        yield await SSEResponse.send_progress("保存大纲到数据库...", 45)
         created_outlines = []
-        for index, chapter_data in enumerate(outline_data[:chapter_count], 1):
-            chapter_num = chapter_data.get("chapter_number", index)
-            
+        for index, outline_item in enumerate(outline_data[:outline_count], 1):
             outline = Outline(
                 project_id=project_id,
-                title=chapter_data.get("title", f"第{chapter_num}章"),
-                content=chapter_data.get("summary", chapter_data.get("content", "")),
-                structure=json.dumps(chapter_data, ensure_ascii=False),
-                order_index=chapter_num
+                title=outline_item.get("title", f"第{index}节"),
+                content=outline_item.get("summary", outline_item.get("content", "")),
+                structure=json.dumps(outline_item, ensure_ascii=False),
+                order_index=index
             )
             db.add(outline)
             created_outlines.append(outline)
-            
-            chapter = Chapter(
-                project_id=project_id,
-                chapter_number=chapter_num,
-                title=chapter_data.get("title", f"第{chapter_num}章"),
-                summary=chapter_data.get("summary", chapter_data.get("content", ""))[:500] if chapter_data.get("summary") or chapter_data.get("content") else "",
-                status="draft"
-            )
-            db.add(chapter)
         
-        # 更新项目（向导固定生成5章作为开局）
-        project.chapter_count = 5
+        await db.flush()  # 获取大纲ID
+        for outline in created_outlines:
+            await db.refresh(outline)
+        
+        logger.info(f"✅ 成功创建{len(created_outlines)}个大纲节点")
+        
+        # 第二阶段：使用PlotExpansionService将每个大纲展开为详细章节
+        yield await SSEResponse.send_progress(f"开始将大纲展开为详细章节...", 50)
+        
+        expansion_service = PlotExpansionService(user_ai_service)
+        total_chapters_created = 0
+        start_chapter_number = 1
+        
+        for outline_idx, outline in enumerate(created_outlines, 1):
+            yield await SSEResponse.send_progress(
+                f"展开第{outline_idx}/{len(created_outlines)}个大纲节点...",
+                50 + (outline_idx - 1) * 35 // len(created_outlines)
+            )
+            
+            try:
+                # 分析大纲并生成章节规划
+                chapter_plans = await expansion_service.analyze_outline_for_chapters(
+                    outline=outline,
+                    project=project,
+                    db=db,
+                    target_chapter_count=chapters_per_outline,
+                    expansion_strategy="balanced",
+                    enable_scene_analysis=False,
+                    provider=provider,
+                    model=model
+                )
+                
+                logger.info(f"大纲 {outline.title} 生成了 {len(chapter_plans)} 个章节规划")
+                
+                # 创建章节记录
+                chapters = await expansion_service.create_chapters_from_plans(
+                    outline_id=outline.id,
+                    chapter_plans=chapter_plans,
+                    project_id=project_id,
+                    db=db,
+                    start_chapter_number=start_chapter_number
+                )
+                
+                total_chapters_created += len(chapters)
+                start_chapter_number += len(chapters)
+                
+                logger.info(f"✅ 大纲 {outline.title} 创建了 {len(chapters)} 个章节记录")
+                
+            except Exception as e:
+                logger.error(f"❌ 展开大纲 {outline.title} 失败: {e}")
+                yield await SSEResponse.send_progress(
+                    f"⚠️ 展开大纲{outline_idx}失败，跳过",
+                    50 + outline_idx * 35 // len(created_outlines),
+                    "warning"
+                )
+                continue
+        
+        # 更新项目信息
+        project.chapter_count = total_chapters_created
         project.narrative_perspective = narrative_perspective
         project.target_words = target_words
         project.status = "writing"
         project.wizard_status = "completed"
-        
         project.wizard_step = 4
         
         await db.commit()
         db_committed = True
         
+        logger.info(f"📊 向导大纲生成完成：")
+        logger.info(f"  - 创建大纲节点：{len(created_outlines)} 个")
+        logger.info(f"  - 创建详细章节：{total_chapters_created} 个")
+        logger.info(f"  - 平均每个大纲：{total_chapters_created / len(created_outlines):.1f} 章")
+        
         # 发送结果
         yield await SSEResponse.send_result({
-            "message": f"成功生成{len(created_outlines)}章大纲",
-            "count": len(created_outlines),
+            "message": f"成功生成{len(created_outlines)}个大纲节点，展开为{total_chapters_created}个详细章节",
+            "outline_count": len(created_outlines),
+            "chapter_count": total_chapters_created,
             "outlines": [
                 {
+                    "id": outline.id,
                     "order_index": outline.order_index,
                     "title": outline.title,
                     "content": outline.content[:100] + "..." if len(outline.content) > 100 else outline.content
