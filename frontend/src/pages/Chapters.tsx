@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, Tooltip, InputNumber, Progress, Alert, Radio, Descriptions, Collapse, Popconfirm } from 'antd';
-import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined } from '@ant-design/icons';
+import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, Tooltip, InputNumber, Progress, Alert, Radio, Descriptions, Collapse, Popconfirm, FloatButton } from 'antd';
+import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useChapterSync } from '../store/hooks';
 import { projectApi, writingStyleApi } from '../services/api';
 import type { Chapter, ChapterUpdate, ApiError, WritingStyle, AnalysisTask, ExpansionPlanData } from '../types';
 import ChapterAnalysis from '../components/ChapterAnalysis';
 import { SSELoadingOverlay } from '../components/SSELoadingOverlay';
+import FloatingIndexPanel from '../components/FloatingIndexPanel';
 
 const { TextArea } = Input;
 
@@ -29,6 +30,7 @@ export default function Chapters() {
   // 分析任务状态管理
   const [analysisTasksMap, setAnalysisTasksMap] = useState<Record<string, AnalysisTask>>({});
   const pollingIntervalsRef = useRef<Record<string, number>>({});
+  const [isIndexPanelVisible, setIsIndexPanelVisible] = useState(false);
   
   // 单章节生成进度状态
   const [singleChapterProgress, setSingleChapterProgress] = useState(0);
@@ -847,9 +849,22 @@ export default function Chapters() {
       message.error('删除章节失败：' + (error.message || '未知错误'));
     }
   };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+ 
+   const handleChapterSelect = (chapterId: string) => {
+     const element = document.getElementById(`chapter-item-${chapterId}`);
+     if (element) {
+       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+       // Optional: add a visual highlight effect
+       element.style.transition = 'background-color 0.5s ease';
+       element.style.backgroundColor = '#e6f7ff';
+       setTimeout(() => {
+         element.style.backgroundColor = '';
+       }, 1500);
+     }
+   };
+ 
+   return (
+     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{
         position: 'sticky',
         top: 0,
@@ -891,7 +906,7 @@ export default function Chapters() {
         </Space>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {chapters.length === 0 ? (
           <Empty description="还没有章节，开始创作吧！" />
         ) : (
@@ -933,6 +948,7 @@ export default function Chapters() {
                   dataSource={group.chapters}
                   renderItem={(item) => (
                     <List.Item
+                      id={`chapter-item-${item.id}`}
                       style={{
                         padding: '16px 0',
                         borderRadius: 8,
@@ -1000,38 +1016,46 @@ export default function Chapters() {
                         <List.Item.Meta
                           avatar={!isMobile && <FileTextOutlined style={{ fontSize: 32, color: '#1890ff' }} />}
                           title={
-                            <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 8, flexWrap: 'wrap', fontSize: isMobile ? 14 : 16 }}>
-                              <span>
+                            <div style={{
+                              display: 'flex',
+                              flexDirection: isMobile ? 'column' : 'row',
+                              alignItems: isMobile ? 'flex-start' : 'center',
+                              gap: isMobile ? 6 : 12,
+                              width: '100%'
+                            }}>
+                              <span style={{ fontSize: isMobile ? 14 : 16, fontWeight: 500, flexShrink: 0 }}>
                                 第{item.chapter_number}章：{item.title}
                               </span>
-                              <Tag color={getStatusColor(item.status)}>{getStatusText(item.status)}</Tag>
-                              <Badge count={`${item.word_count || 0}字`} style={{ backgroundColor: '#52c41a' }} />
-                              {renderAnalysisStatus(item.id)}
-                              {item.expansion_plan && (
-                                <Tooltip title="已有展开规划，点击信息图标查看详情">
-                                  <Tag icon={<CheckCircleOutlined />} color="blue">
-                                    已展开
-                                  </Tag>
-                                </Tooltip>
-                              )}
-                              {!canGenerateChapter(item) && (
-                                <Tooltip title={getGenerateDisabledReason(item)}>
-                                  <Tag icon={<LockOutlined />} color="warning">
-                                    需前置章节
-                                  </Tag>
-                                </Tooltip>
-                              )}
-                              {item.expansion_plan && (
-                                <Tooltip title="查看展开规划详情">
-                                  <InfoCircleOutlined
-                                    style={{ color: '#1890ff', cursor: 'pointer', fontSize: 16 }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      showExpansionPlanModal(item);
-                                    }}
-                                  />
-                                </Tooltip>
-                              )}
+                              <Space wrap size={isMobile ? 4 : 8}>
+                                <Tag color={getStatusColor(item.status)}>{getStatusText(item.status)}</Tag>
+                                <Badge count={`${item.word_count || 0}字`} style={{ backgroundColor: '#52c41a' }} />
+                                {renderAnalysisStatus(item.id)}
+                                {item.expansion_plan && (
+                                  <Tooltip title="已有展开规划，点击信息图标查看详情">
+                                    <Tag icon={<CheckCircleOutlined />} color="blue">
+                                      已展开
+                                    </Tag>
+                                  </Tooltip>
+                                )}
+                                {!canGenerateChapter(item) && (
+                                  <Tooltip title={getGenerateDisabledReason(item)}>
+                                    <Tag icon={<LockOutlined />} color="warning">
+                                      需前置章节
+                                    </Tag>
+                                  </Tooltip>
+                                )}
+                                {item.expansion_plan && (
+                                  <Tooltip title="查看展开规划详情">
+                                    <InfoCircleOutlined
+                                      style={{ color: '#1890ff', cursor: 'pointer', fontSize: 16 }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        showExpansionPlanModal(item);
+                                      }}
+                                    />
+                                  </Tooltip>
+                                )}
+                              </Space>
                             </div>
                           }
                           description={
@@ -1334,6 +1358,20 @@ export default function Chapters() {
           onClose={() => {
             setAnalysisVisible(false);
             
+            // 刷新章节列表以显示最新内容
+            refreshChapters();
+            
+            // 刷新项目信息以更新字数统计
+            if (currentProject) {
+              projectApi.getProject(currentProject.id)
+                .then(updatedProject => {
+                  setCurrentProject(updatedProject);
+                })
+                .catch(error => {
+                  console.error('刷新项目信息失败:', error);
+                });
+            }
+            
             // 延迟500ms后刷新该章节的分析状态，给后端足够时间完成数据库写入
             if (analysisChapterId) {
               const chapterIdToRefresh = analysisChapterId;
@@ -1629,6 +1667,21 @@ export default function Chapters() {
         loading={isGenerating}
         progress={singleChapterProgress}
         message={singleChapterProgressMessage}
+      />
+
+      <FloatButton
+        icon={<BookOutlined />}
+        type="primary"
+        tooltip="章节目录"
+        onClick={() => setIsIndexPanelVisible(true)}
+        style={{ right: isMobile ? 24 : 48, bottom: isMobile ? 80 : 48 }}
+      />
+
+      <FloatingIndexPanel
+        visible={isIndexPanelVisible}
+        onClose={() => setIsIndexPanelVisible(false)}
+        groupedChapters={groupedChapters}
+        onChapterSelect={handleChapterSelect}
       />
     </div>
   );

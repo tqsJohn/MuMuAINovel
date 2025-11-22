@@ -50,28 +50,32 @@ const ChapterContentComparison: React.FC<ChapterContentComparisonProps> = ({
         throw new Error('应用新内容失败');
       }
 
-      message.success('新内容已应用！正在触发章节分析...');
+      message.success('新内容已应用！');
       
-      // 触发章节分析
-      try {
-        const analysisResponse = await fetch(`/api/chapters/${chapterId}/analyze`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          }
-        });
+      // 先调用 onApply 通知父组件刷新
+      onApply();
+      
+      // 延迟触发章节分析，给父组件时间刷新
+      setTimeout(async () => {
+        try {
+          const analysisResponse = await fetch(`/api/chapters/${chapterId}/analyze`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            }
+          });
 
-        if (analysisResponse.ok) {
-          message.success('章节分析已开始，请稍后查看结果');
-        } else {
+          if (analysisResponse.ok) {
+            message.success('章节分析已开始，请稍后查看结果');
+          } else {
+            message.warning('章节分析触发失败，您可以手动触发分析');
+          }
+        } catch (analysisError) {
+          console.error('触发分析失败:', analysisError);
           message.warning('章节分析触发失败，您可以手动触发分析');
         }
-      } catch (analysisError) {
-        console.error('触发分析失败:', analysisError);
-        message.warning('章节分析触发失败，您可以手动触发分析');
-      }
+      }, 500);
       
-      onApply();
       onClose();
     } catch (error: any) {
       message.error(error.message || '应用失败');

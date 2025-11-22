@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mumuai_novel}
       POSTGRES_USER: ${POSTGRES_USER:-mumuai}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mumuai_password_2024}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
@@ -72,7 +72,7 @@ services:
       - DEBUG=${DEBUG:-false}
       
       # 数据库配置
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-mumuai}:${POSTGRES_PASSWORD:-mumuai_password_2024}@postgres:5432/${POSTGRES_DB:-mumuai_novel}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-mumuai}:${POSTGRES_PASSWORD:-123456}@postgres:5432/${POSTGRES_DB:-mumuai_novel}
       
       # PostgreSQL 连接池配置
       - DATABASE_POOL_SIZE=${DATABASE_POOL_SIZE:-30}

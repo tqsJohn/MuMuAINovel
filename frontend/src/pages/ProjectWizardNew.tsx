@@ -140,7 +140,7 @@ export default function ProjectWizardNew() {
       await wizardStreamApi.generateCompleteOutlineStream(
         {
           project_id: createdProjectId,
-          chapter_count: 5, // 开局5章
+          chapter_count: 3, // 生成3个大纲节点（不展开）
           narrative_perspective: values.narrative_perspective,
           target_words: values.target_words,
         },
@@ -190,7 +190,7 @@ export default function ProjectWizardNew() {
         创建新项目
       </Title>
       <Paragraph type="secondary" style={{ marginBottom: 32 }}>
-        填写基本信息后，AI将自动为您生成世界观、角色和开局大纲
+        填写基本信息后，AI将自动为您生成世界观、角色和大纲节点（大纲可在项目内手动展开为章节）
       </Paragraph>
 
       <Form
@@ -432,7 +432,13 @@ export default function ProjectWizardNew() {
           marginTop: isMobile ? 16 : 24,
           marginBottom: isMobile ? 32 : 48,
         }}>
-          《{projectTitle}》已成功创建，包含完整的世界观、角色和开局大纲
+          《{projectTitle}》已成功创建，包含完整的世界观、角色和大纲节点
+        </Paragraph>
+        <Paragraph type="secondary" style={{
+          fontSize: isMobile ? 12 : 14,
+          marginTop: 8,
+        }}>
+          💡 提示：进入项目后，可在"大纲"页面将大纲节点展开为详细章节
         </Paragraph>
         
         <Space

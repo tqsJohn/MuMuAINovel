@@ -876,16 +876,14 @@ async def outline_generator(
     db: AsyncSession,
     user_ai_service: AIService
 ) -> AsyncGenerator[str, None]:
-    """大纲生成流式生成器 - 向导生成3个大纲节点，每个展开为3章，共9章"""
+    """大纲生成流式生成器 - 向导仅生成大纲节点，不展开章节（避免等待过久）"""
     db_committed = False
     try:
         yield await SSEResponse.send_progress("开始生成大纲...", 5)
         
         project_id = data.get("project_id")
-        # 向导固定生成3个大纲节点
-        outline_count = 3
-        # 每个大纲展开为3章
-        chapters_per_outline = 3
+        # 向导固定生成3个大纲节点（不展开）
+        outline_count = data.get("chapter_count", 3)
         narrative_perspective = data.get("narrative_perspective")
         target_words = data.get("target_words", 100000)
         requirements = data.get("requirements", "")
@@ -989,59 +987,12 @@ async def outline_generator(
         
         logger.info(f"✅ 成功创建{len(created_outlines)}个大纲节点")
         
-        # 第二阶段：使用PlotExpansionService将每个大纲展开为详细章节
-        yield await SSEResponse.send_progress(f"开始将大纲展开为详细章节...", 50)
-        
-        expansion_service = PlotExpansionService(user_ai_service)
-        total_chapters_created = 0
-        start_chapter_number = 1
-        
-        for outline_idx, outline in enumerate(created_outlines, 1):
-            yield await SSEResponse.send_progress(
-                f"展开第{outline_idx}/{len(created_outlines)}个大纲节点...",
-                50 + (outline_idx - 1) * 35 // len(created_outlines)
-            )
-            
-            try:
-                # 分析大纲并生成章节规划
-                chapter_plans = await expansion_service.analyze_outline_for_chapters(
-                    outline=outline,
-                    project=project,
-                    db=db,
-                    target_chapter_count=chapters_per_outline,
-                    expansion_strategy="balanced",
-                    enable_scene_analysis=False,
-                    provider=provider,
-                    model=model
-                )
-                
-                logger.info(f"大纲 {outline.title} 生成了 {len(chapter_plans)} 个章节规划")
-                
-                # 创建章节记录
-                chapters = await expansion_service.create_chapters_from_plans(
-                    outline_id=outline.id,
-                    chapter_plans=chapter_plans,
-                    project_id=project_id,
-                    db=db,
-                    start_chapter_number=start_chapter_number
-                )
-                
-                total_chapters_created += len(chapters)
-                start_chapter_number += len(chapters)
-                
-                logger.info(f"✅ 大纲 {outline.title} 创建了 {len(chapters)} 个章节记录")
-                
-            except Exception as e:
-                logger.error(f"❌ 展开大纲 {outline.title} 失败: {e}")
-                yield await SSEResponse.send_progress(
-                    f"⚠️ 展开大纲{outline_idx}失败，跳过",
-                    50 + outline_idx * 35 // len(created_outlines),
-                    "warning"
-                )
-                continue
+        # 向导流程中不展开大纲，避免等待时间过长
+        # 用户可以在大纲页面手动展开需要的大纲节点
+        yield await SSEResponse.send_progress("跳过大纲展开，加快创建速度...", 85)
         
         # 更新项目信息
-        project.chapter_count = total_chapters_created
+        project.chapter_count = 0  # 向导阶段不创建章节
         project.narrative_perspective = narrative_perspective
         project.target_words = target_words
         project.status = "writing"
@@ -1053,20 +1004,20 @@ async def outline_generator(
         
         logger.info(f"📊 向导大纲生成完成：")
         logger.info(f"  - 创建大纲节点：{len(created_outlines)} 个")
-        logger.info(f"  - 创建详细章节：{total_chapters_created} 个")
-        logger.info(f"  - 平均每个大纲：{total_chapters_created / len(created_outlines):.1f} 章")
+        logger.info(f"  - 提示：可在大纲页面手动展开为章节")
         
         # 发送结果
         yield await SSEResponse.send_result({
-            "message": f"成功生成{len(created_outlines)}个大纲节点，展开为{total_chapters_created}个详细章节",
+            "message": f"成功生成{len(created_outlines)}个大纲节点（未展开章节，可在大纲页面手动展开）",
             "outline_count": len(created_outlines),
-            "chapter_count": total_chapters_created,
+            "chapter_count": 0,
             "outlines": [
                 {
                     "id": outline.id,
                     "order_index": outline.order_index,
                     "title": outline.title,
-                    "content": outline.content[:100] + "..." if len(outline.content) > 100 else outline.content
+                    "content": outline.content[:100] + "..." if len(outline.content) > 100 else outline.content,
+                    "note": "可在大纲页面展开为章节"
                 } for outline in created_outlines
             ]
         })
