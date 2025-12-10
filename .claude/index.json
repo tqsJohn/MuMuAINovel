@@ -1,0 +1,86 @@
+{
+  "project_name": "MuMuAINovel",
+  "description": "基于 AI 的智能小说创作助手",
+  "scan_timestamp": "2025-12-10T19:50:29",
+  "modules": [
+    {
+      "name": "backend",
+      "path": "backend",
+      "type": "python",
+      "language": "Python 3.11",
+      "entry_points": [
+        "backend/app/main.py",
+        "backend/run.py"
+      ],
+      "key_directories": {
+        "api": "backend/app/api",
+        "models": "backend/app/models",
+        "services": "backend/app/services",
+        "middleware": "backend/app/middleware",
+        "schemas": "backend/app/schemas",
+        "mcp": "backend/app/mcp",
+        "utils": "backend/app/utils",
+        "scripts": "backend/scripts"
+      },
+      "dependencies": "backend/requirements.txt",
+      "database": "PostgreSQL 18 (asyncpg)",
+      "framework": "FastAPI 0.121.0"
+    },
+    {
+      "name": "frontend",
+      "path": "frontend",
+      "type": "react",
+      "language": "TypeScript",
+      "entry_points": [
+        "frontend/src/main.tsx",
+        "frontend/src/App.tsx"
+      ],
+      "key_directories": {
+        "pages": "frontend/src/pages",
+        "components": "frontend/src/components",
+        "services": "frontend/src/services",
+        "store": "frontend/src/store",
+        "utils": "frontend/src/utils",
+        "types": "frontend/src/types"
+      },
+      "dependencies": "frontend/package.json",
+      "framework": "React 18.3.1 + Vite 7.1.7"
+    }
+  ],
+  "coverage": {
+    "estimated_total_files": 150,
+    "scanned_files": 120,
+    "coverage_percent": 80,
+    "scanned_modules": [
+      "backend/app/api (19 files)",
+      "backend/app/models (17 files)",
+      "backend/app/services (11 files)",
+      "frontend/src/pages (20 files)",
+      "frontend/src/components (15+ files)"
+    ],
+    "ignored_patterns": [
+      "node_modules/**",
+      "__pycache__/**",
+      ".venv/**",
+      ".git/**",
+      "dist/**",
+      "build/**",
+      "*.db",
+      "*.log",
+      "backend/embedding/models--*/**"
+    ]
+  },
+  "gaps": {
+    "missing_tests": [
+      "backend/tests (未发现)",
+      "frontend/tests (未发现)"
+    ],
+    "recommended_next_scan": [
+      "backend/app/mcp/adapters (MCP适配器详细逻辑)",
+      "frontend/src/components (完整组件列表)",
+      "backend/scripts (迁移脚本细节)"
+    ]
+  },
+  "truncated": false,
+  "version": "1.0.11"
+}
